@@ -1,0 +1,31 @@
+# Entornos virtuales y caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Variables de entorno y secretos
+.env
+.env.*
+!.env.example
+
+# Datos locales, muestras de voz y workspaces multimedia (no se versionan)
+data/
+workspaces/
+
+# Archivos de trabajo locales de project-suite (VERSION_WORK=no)
+docs/task/
+docs/plan/
+docs/logs/
+CLAUDE.md
+AGENTS.md
+.project-suite/
