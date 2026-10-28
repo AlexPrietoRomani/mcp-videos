@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<style>
+  :root {
+    --time-ms: 0;
+    --accent: {{ACCENT}};
+    --background: {{BACKGROUND}};
+    --foreground: {{FOREGROUND}};
+    --muted: {{MUTED}};
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  body {
+    width: {{WIDTH}}px;
+    height: {{HEIGHT}}px;
+    display: grid;
+    place-items: center;
+  }
+  .scene {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    padding: 72px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 36px;
+  }
+  .scene::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+    background-size: 72px 72px;
+    pointer-events: none;
+  }
+  .title {
+    position: relative;
+    margin: 0;
+    font-size: 82px;
+    line-height: 1.02;
+    letter-spacing: -0.03em;
+  }
+  .content {
+    position: relative;
+    font-size: 34px;
+    line-height: 1.4;
+    color: var(--muted);
+  }
+  .progress {
+    position: relative;
+    height: 12px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .progress > span {
+    display: block;
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--accent), rgba(255, 255, 255, 0.9));
+  }
+  .clock {
+    position: relative;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    font-size: 24px;
+  }
+</style>
+</head>
+<body>
+  <main class="scene" id="scene-root" data-duration-ms="{{DURATION_MS}}">
+    <p class="clock" id="scene-clock">0.00 s</p>
+    <h1 class="title">{{TITLE}}</h1>
+    <div class="content">{{BODY}}</div>
+    <div class="progress"><span id="scene-progress"></span></div>
+  </main>
+  <script data-mcp-videos-harness="1">{{HARNESS_JS}}</script>
+  <script>
+    (function () {
+      "use strict";
+      var root = document.getElementById("scene-root");
+      var duration = Math.max(1, Number(root.getAttribute("data-duration-ms")) || 1);
+      var progressBar = document.getElementById("scene-progress");
+      var clock = document.getElementById("scene-clock");
+
+      function formatSeconds(value) {
+        return (Math.max(0, value) / 1000).toFixed(2) + " s";
+      }
+
+      window.onFrameTime = function (timeMs) {
+        var time = Math.max(0, Math.min(duration, Number(timeMs) || 0));
+        var progress = window.MotionKit.progressInRange(time, 0, duration);
+        progressBar.style.width = (progress * 100).toFixed(3) + "%";
+        clock.textContent = formatSeconds(time) + " / " + formatSeconds(duration);
+        root.setAttribute("data-progress", progress.toFixed(4));
+      };
+
+      window.onFrameTime(window.__currentTimeMs || 0);
+    })();
+  </script>
+</body>
+</html>
