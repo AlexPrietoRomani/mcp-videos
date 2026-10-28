@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling>=1.26.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-videos"
+version = "0.1.0"
+description = "Servidor MCP, CLI y motor determinista para videos cortos con HTML Motion Graphics y dialogo multivoz"
+readme = "docs/description_proyecto.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Alex Prieto Romani", email = "alexprieto1997@gmail.com" }]
+keywords = ["mcp", "video", "tts", "playwright", "ffmpeg", "motion-graphics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+]
+dependencies = [
+    "mcp>=1.2.0",
+    "typer>=0.12.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "httpx>=0.27.0",
+    "playwright>=1.48.0",
+    "faster-whisper>=1.0.3",
+    "kokoro-onnx>=0.3.0",
+]
+
+[project.scripts]
+mcp-videos = "mcp_videos.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.7.0",
+    "pre-commit>=4.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_videos"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/mcp_videos", "docs", "pyproject.toml"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "C4", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
