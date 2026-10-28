@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mcp-videos · Live Studio Preview</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #05070c;
+      --panel: #0a1019;
+      --panel-soft: #0e1724;
+      --border: #1c2a3c;
+      --text: #e6eefb;
+      --muted: #8fa3ba;
+      --accent: #67e8f9;
+      --accent-strong: #22d3ee;
+      --accent-ink: #04131a;
+      --danger: #fb7185;
+      --ok: #6ee7b7;
+      --radius: 16px;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+    }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(34, 211, 238, 0.12), transparent 34rem),
+        radial-gradient(circle at 88% 8%, rgba(139, 92, 246, 0.1), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font-family: "Inter", "SF Pro Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+
+    button,
+    select,
+    input {
+      font: inherit;
+    }
+
+    .studio-header {
+      align-items: center;
+      backdrop-filter: blur(18px);
+      background: rgba(5, 7, 12, 0.82);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 1.25rem;
+      justify-content: space-between;
+      padding: 1rem 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+
+    .brand {
+      align-items: center;
+      display: flex;
+      gap: 0.75rem;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      align-items: center;
+      background: linear-gradient(145deg, var(--accent), #818cf8);
+      border-radius: 12px;
+      color: var(--accent-ink);
+      display: inline-flex;
+      font-size: 0.9rem;
+      font-weight: 800;
+      height: 2.2rem;
+      justify-content: center;
+      letter-spacing: -0.06em;
+      width: 2.2rem;
+    }
+
+    .brand-copy {
+      display: grid;
+      gap: 0.1rem;
+      min-width: 0;
+    }
+
+    .brand-copy strong {
+      font-size: 0.98rem;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+    }
+
+    .brand-copy span {
+      color: var(--muted);
+      font-size: 0.72rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .header-controls {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      justify-content: flex-end;
+    }
+
+    .field {
+      align-items: center;
+      color: var(--muted);
+      display: flex;
+      font-size: 0.78rem;
+      gap: 0.5rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    select,
+    .ghost-button,
+    .primary-button {
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      min-height: 2.25rem;
+      outline: none;
+      padding: 0.45rem 0.7rem;
+      transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+    }
+
+    select {
+      max-width: 18rem;
+      text-transform: none;
+    }
+
+    select:focus-visible,
+    .ghost-button:focus-visible,
+    .primary-button:focus-visible,
+    input[type="range"]:focus-visible {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(103, 232, 249, 0.16);
+    }
+
+    .ghost-button {
+      cursor: pointer;
+      font-size: 0.82rem;
+    }
+
+    .ghost-button:hover {
+      background: #132033;
+      border-color: #2a405a;
+    }
+
+    .primary-button {
+      background: linear-gradient(135deg, var(--accent), #60a5fa);
+      border: 0;
+      color: var(--accent-ink);
+      cursor: pointer;
+      font-size: 0.86rem;
+      font-weight: 750;
+      letter-spacing: 0.01em;
+      padding: 0.65rem 1rem;
+      width: 100%;
+    }
+
+    .primary-button:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .primary-button:disabled,
+    .ghost-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    .studio-layout {
+      display: grid;
+      gap: 1.25rem;
+      grid-template-columns: minmax(0, 1.35fr) minmax(18rem, 0.65fr);
+      margin: 0 auto;
+      max-width: 1480px;
+      padding: 1.25rem;
+    }
+
+    .stage-panel,
+    .inspector {
+      background: linear-gradient(180deg, rgba(12, 20, 31, 0.96), rgba(7, 11, 18, 0.96));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .stage-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+      padding: 1rem;
+    }
+
+    .stage-topline {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+      justify-content: space-between;
+    }
+
+    .stage-title {
+      display: grid;
+      gap: 0.15rem;
+      min-width: 0;
+    }
+
+    .stage-title strong {
+      font-size: 0.95rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stage-title span {
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
+    .badge {
+      background: rgba(103, 232, 249, 0.08);
+      border: 1px solid rgba(103, 232, 249, 0.24);
+      border-radius: 999px;
+      color: var(--accent);
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      padding: 0.25rem 0.55rem;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .stage-shell {
+      aspect-ratio: 9 / 16;
+      background: #020409;
+      border: 1px solid #1a283a;
+      border-radius: 28px;
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+        0 20px 60px rgba(0, 0, 0, 0.6);
+      margin: 0 auto;
+      max-width: 520px;
+      overflow: hidden;
+      position: relative;
+      width: min(100%, calc((100dvh - 18rem) * 9 / 16));
+    }
+
+    .stage-frame {
+      height: 1920px;
+      left: 0;
+      position: absolute;
+      top: 0;
+      transform-origin: left top;
+      width: 1080px;
+    }
+
+    #stage-iframe {
+      background: #05070d;
+      border: 0;
+      display: block;
+      height: 1920px;
+      width: 1080px;
+    }
+
+    .stage-placeholder {
+      align-items: center;
+      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      font-size: 0.9rem;
+      gap: 0.75rem;
+      inset: 0;
+      justify-content: center;
+      padding: 2rem;
+      position: absolute;
+      text-align: center;
+    }
+
+    .stage-placeholder[hidden] {
+      display: none;
+    }
+
+    .stage-placeholder strong {
+      color: var(--text);
+      font-size: 1.05rem;
+    }
+
+    .transport {
+      align-items: center;
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      display: grid;
+      gap: 0.75rem;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      padding: 0.75rem;
+    }
+
+    #play-pause {
+      align-items: center;
+      background: rgba(103, 232, 249, 0.12);
+      border: 1px solid rgba(103, 232, 249, 0.28);
+      border-radius: 999px;
+      color: var(--accent);
+      cursor: pointer;
+      display: inline-flex;
+      height: 2.5rem;
+      justify-content: center;
+      width: 2.5rem;
+    }
+
+    #play-pause:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    .timeline-wrap {
+      display: grid;
+      gap: 0.4rem;
+      min-width: 0;
+    }
+
+    #timeline {
+      accent-color: var(--accent);
+      background: transparent;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    .time-label {
+      color: var(--muted);
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.72rem;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    audio {
+      height: 2.5rem;
+      max-width: 20rem;
+      width: 100%;
+    }
+
+    .inspector {
+      align-self: start;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      max-height: calc(100dvh - 7rem);
+      overflow: auto;
+      padding: 1rem;
+      position: sticky;
+      top: 5rem;
+    }
+
+    .inspector-section {
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .section-heading {
+      align-items: baseline;
+      display: flex;
+      gap: 0.5rem;
+      justify-content: space-between;
+    }
+
+    .section-heading h2 {
+      font-size: 0.78rem;
+      letter-spacing: 0.14em;
+      margin: 0;
+      text-transform: uppercase;
+    }
+
+    .section-heading span {
+      color: var(--muted);
+      font-size: 0.7rem;
+    }
+
+    .project-summary {
+      color: var(--muted);
+      display: grid;
+      font-size: 0.78rem;
+      gap: 0.3rem;
+      line-height: 1.45;
+    }
+
+    .project-summary strong {
+      color: var(--text);
+      font-size: 0.92rem;
+    }
+
+    .scene-list,
+    .word-cues {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .scene-chip,
+    .word-cue {
+      background: #0b1420;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    }
+
+    .scene-chip {
+      border-radius: 9px;
+      font-size: 0.74rem;
+      padding: 0.35rem 0.55rem;
+      text-align: left;
+    }
+
+    .scene-chip.active {
+      background: rgba(96, 165, 250, 0.14);
+      border-color: rgba(96, 165, 250, 0.5);
+      color: #bfdbfe;
+    }
+
+    .word-cue {
+      border-radius: 999px;
+      font-size: 0.8rem;
+      line-height: 1.2;
+      padding: 0.32rem 0.58rem;
+    }
+
+    .word-cue:hover {
+      background: #132033;
+      border-color: #2a405a;
+      color: var(--text);
+    }
+
+    .word-cue.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 750;
+    }
+
+    .empty-words {
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    .status-line {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.7rem;
+      line-height: 1.45;
+      margin: 0;
+      min-height: 2.5rem;
+      overflow-wrap: anywhere;
+      padding: 0.55rem 0.65rem;
+    }
+
+    .status-line[data-tone="error"] {
+      border-color: rgba(251, 113, 133, 0.4);
+      color: var(--danger);
+    }
+
+    .status-line[data-tone="ok"] {
+      border-color: rgba(110, 231, 183, 0.36);
+      color: var(--ok);
+    }
+
+    @media (max-width: 980px) {
+      .studio-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .inspector {
+        max-height: none;
+        position: static;
+      }
+
+      .stage-shell {
+        width: min(100%, calc((100dvh - 22rem) * 9 / 16));
+      }
+    }
+
+    @media (max-width: 640px) {
+      .studio-header {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 0.8rem 1rem;
+      }
+
+      .header-controls,
+      .field {
+        width: 100%;
+      }
+
+      select {
+        flex: 1;
+        max-width: none;
+      }
+
+      .studio-layout {
+        padding: 0.75rem;
+      }
+
+      .transport {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      audio {
+        grid-column: 1 / -1;
+        max-width: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="studio-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">mv</span>
+      <div class="brand-copy">
+        <strong>mcp-videos</strong>
+        <span>Live Studio Preview</span>
+      </div>
+    </div>
+    <div class="header-controls">
+      <label class="field" for="project-select">
+        Proyecto
+        <select id="project-select" aria-label="Seleccionar proyecto"></select>
+      </label>
+      <button id="refresh-button" class="ghost-button" type="button">Refrescar</button>
+    </div>
+  </header>
+
+  <main class="studio-layout">
+    <section class="stage-panel" aria-label="Stage de previsualización">
+      <div class="stage-topline">
+        <div class="stage-title">
+          <strong id="project-title">Sin proyecto</strong>
+          <span id="project-status">Selecciona un proyecto para inspeccionar su timeline</span>
+        </div>
+        <span class="badge" id="scene-badge">9:16 · 1080×1920</span>
+      </div>
+
+      <div class="stage-shell" id="stage-shell">
+        <div class="stage-frame" id="stage-frame">
+          <iframe
+            id="stage-iframe"
+            title="Escena HTML del proyecto"
+            width="1080"
+            height="1920"
+            loading="eager"
+            referrerpolicy="no-referrer"
+          ></iframe>
+        </div>
+        <div class="stage-placeholder" id="stage-placeholder">
+          <strong>Estudio listo</strong>
+          <span>Carga un proyecto para montar la primera escena.</span>
+        </div>
+      </div>
+
+      <div class="transport" aria-label="Controles de reproducción">
+        <button id="play-pause" type="button" aria-label="Reproducir" disabled>▶</button>
+        <div class="timeline-wrap">
+          <input
+            id="timeline"
+            type="range"
+            min="0"
+            max="0"
+            step="1"
+            value="0"
+            aria-label="Scrubber de tiempo del proyecto"
+            disabled
+          >
+          <span class="time-label" id="time-label">00:00.000 / 00:00.000</span>
+        </div>
+        <audio id="master-audio" controls preload="metadata"></audio>
+      </div>
+    </section>
+
+    <aside class="inspector" aria-label="Inspector del proyecto">
+      <section class="inspector-section">
+        <div class="section-heading">
+          <h2>Proyecto</h2>
+          <span id="project-meta"></span>
+        </div>
+        <div class="project-summary" id="project-summary">
+          <span>Sin datos cargados.</span>
+        </div>
+      </section>
+
+      <section class="inspector-section">
+        <div class="section-heading">
+          <h2>Escenas</h2>
+          <span id="scene-count">0</span>
+        </div>
+        <div class="scene-list" id="scene-list"></div>
+      </section>
+
+      <section class="inspector-section">
+        <div class="section-heading">
+          <h2>Word cues</h2>
+          <span id="word-count">0</span>
+        </div>
+        <div class="word-cues" id="word-cues" aria-live="polite"></div>
+      </section>
+
+      <section class="inspector-section">
+        <button id="render-button" class="primary-button" type="button" disabled>
+          Renderizar MP4
+        </button>
+        <p id="render-status" class="status-line" aria-live="polite"></p>
+      </section>
+    </aside>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      const DESIGN_WIDTH = 1080;
+      const DESIGN_HEIGHT = 1920;
+
+      const state = {
+        projects: [],
+        manifest: null,
+        projectId: null,
+        currentTimeMs: 0,
+        durationMs: 0,
+        activeSceneIndex: -1,
+        lastFrameTimeMs: 0,
+        pendingLocalMs: 0,
+        stageScale: 1,
+        sceneLoadToken: 0,
+        lastRenderResponse: null,
+        lastRenderError: null,
+      };
+      window.__previewState = state;
+
+      const projectSelect = document.getElementById("project-select");
+      const refreshButton = document.getElementById("refresh-button");
+      const projectTitle = document.getElementById("project-title");
+      const projectStatus = document.getElementById("project-status");
+      const projectMeta = document.getElementById("project-meta");
+      const projectSummary = document.getElementById("project-summary");
+      const sceneBadge = document.getElementById("scene-badge");
+      const sceneCount = document.getElementById("scene-count");
+      const sceneList = document.getElementById("scene-list");
+      const wordCount = document.getElementById("word-count");
+      const wordCues = document.getElementById("word-cues");
+      const stageShell = document.getElementById("stage-shell");
+      const stageFrame = document.getElementById("stage-frame");
+      const stageIframe = document.getElementById("stage-iframe");
+      const stagePlaceholder = document.getElementById("stage-placeholder");
+      const playPause = document.getElementById("play-pause");
+      const timeline = document.getElementById("timeline");
+      const timeLabel = document.getElementById("time-label");
+      const masterAudio = document.getElementById("master-audio");
+      const renderButton = document.getElementById("render-button");
+      const renderStatus = document.getElementById("render-status");
+
+      function setStatus(message, tone) {
+        renderStatus.textContent = message || "";
+        if (tone) {
+          renderStatus.dataset.tone = tone;
+        } else {
+          delete renderStatus.dataset.tone;
+        }
+      }
+
+      function formatTime(milliseconds) {
+        const total = Math.max(0, Math.round(Number(milliseconds) || 0));
+        const minutes = Math.floor(total / 60000);
+        const seconds = Math.floor((total % 60000) / 1000);
+        const millis = total % 1000;
+        return (
+          String(minutes).padStart(2, "0") +
+          ":" +
+          String(seconds).padStart(2, "0") +
+          "." +
+          String(millis).padStart(3, "0")
+        );
+      }
+
+      async function fetchJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(function () {
+          return null;
+        });
+        if (!response.ok) {
+          const detail = payload && payload.detail ? payload.detail : response.statusText;
+          throw new Error(detail || "La petición falló con estado " + response.status);
+        }
+        return payload;
+      }
+
+      function fitStage() {
+        const bounds = stageShell.getBoundingClientRect();
+        if (bounds.width <= 0 || bounds.height <= 0) {
+          return;
+        }
+        const scale = Math.min(bounds.width / DESIGN_WIDTH, bounds.height / DESIGN_HEIGHT);
+        state.stageScale = scale;
+        stageFrame.style.transform = "scale(" + String(scale) + ")";
+        stageFrame.style.left = String((bounds.width - DESIGN_WIDTH * scale) / 2) + "px";
+        stageFrame.style.top = String((bounds.height - DESIGN_HEIGHT * scale) / 2) + "px";
+      }
+
+      function manifestDuration(manifest) {
+        let duration = Math.max(0, Number(manifest.total_duration_ms) || 0);
+        const scenes = manifest.scenes || [];
+        for (let index = 0; index < scenes.length; index += 1) {
+          duration = Math.max(duration, Number(scenes[index].end_ms) || 0);
+        }
+        const words = manifest.words || [];
+        for (let index = 0; index < words.length; index += 1) {
+          duration = Math.max(duration, Number(words[index].end_ms) || 0);
+        }
+        return Math.round(duration);
+      }
+
+      function sceneAt(timeMs) {
+        if (!state.manifest || !Array.isArray(state.manifest.scenes)) {
+          return null;
+        }
+        const scenes = state.manifest.scenes;
+        if (!scenes.length) {
+          return null;
+        }
+        for (let index = 0; index < scenes.length; index += 1) {
+          if (timeMs < scenes[index].end_ms) {
+            return scenes[index];
+          }
+        }
+        return scenes[scenes.length - 1];
+      }
+
+      function applyFrame(localMs, attempt) {
+        const value = Math.max(0, Number(localMs) || 0);
+        state.lastFrameTimeMs = value;
+        let applied = false;
+        try {
+          const targetWindow = stageIframe.contentWindow;
+          if (targetWindow && typeof targetWindow.__setFrameTime === "function") {
+            targetWindow.__setFrameTime(value);
+            applied = true;
+          }
+        } catch (error) {
+          applied = false;
+        }
+        const retries = typeof attempt === "number" ? attempt : 0;
+        if (!applied && retries < 120 && state.manifest) {
+          window.requestAnimationFrame(function () {
+            applyFrame(value, retries + 1);
+          });
+        }
+        return applied;
+      }
+
+      function mountScene(scene, localMs) {
+        if (!scene) {
+          return;
+        }
+        const sceneIndex = Number(scene.scene_index);
+        if (state.activeSceneIndex === sceneIndex && stageIframe.getAttribute("src")) {
+          applyFrame(localMs);
+          return;
+        }
+        state.activeSceneIndex = sceneIndex;
+        state.sceneLoadToken += 1;
+        const token = state.sceneLoadToken;
+        stagePlaceholder.hidden = true;
+        stageIframe.onload = function () {
+          if (token !== state.sceneLoadToken) {
+            return;
+          }
+          applyFrame(state.pendingLocalMs);
+        };
+        stageIframe.src = scene.html_url || scene.scene_url;
+      }
+
+      function updateActiveWord(timeMs) {
+        const finalTime = timeMs >= state.durationMs;
+        const chips = wordCues.querySelectorAll(".word-cue");
+        for (let index = 0; index < chips.length; index += 1) {
+          const chip = chips[index];
+          const start = Number(chip.dataset.startMs);
+          const end = Number(chip.dataset.endMs);
+          const active =
+            timeMs >= start && (timeMs < end || (finalTime && timeMs <= end));
+          chip.classList.toggle("active", active);
+        }
+      }
+
+      function updateSceneSelection(scene) {
+        const chips = sceneList.querySelectorAll(".scene-chip");
+        const activeIndex = scene ? Number(scene.scene_index) : -1;
+        for (let index = 0; index < chips.length; index += 1) {
+          chips[index].classList.toggle(
+            "active",
+            Number(chips[index].dataset.sceneIndex) === activeIndex
+          );
+        }
+      }
+
+      function syncAudio(timeMs) {
+        if (!state.manifest || !state.manifest.audio_url) {
+          return;
+        }
+        const seconds = timeMs / 1000;
+        const current = Number(masterAudio.currentTime);
+        if (!Number.isFinite(current) || Math.abs(current - seconds) > 0.02) {
+          try {
+            masterAudio.currentTime = seconds;
+          } catch (error) {
+            return;
+          }
+        }
+      }
+
+      function seekTo(timeMs, options) {
+        if (!state.manifest) {
+          return;
+        }
+        const settings = options || {};
+        const duration = manifestDuration(state.manifest);
+        let target = Number(timeMs);
+        if (!Number.isFinite(target)) {
+          target = 0;
+        }
+        target = Math.round(Math.max(0, Math.min(duration, target)));
+        state.currentTimeMs = target;
+        state.durationMs = duration;
+
+        timeline.max = String(Math.max(1, duration));
+        timeline.value = String(target);
+        timeLabel.textContent = formatTime(target) + " / " + formatTime(duration);
+
+        const scene = sceneAt(target);
+        if (scene) {
+          const localMs = Math.max(0, target - Number(scene.start_ms));
+          state.pendingLocalMs = localMs;
+          mountScene(scene, localMs);
+        } else {
+          applyFrame(target);
+        }
+        updateActiveWord(target);
+        updateSceneSelection(scene);
+
+        if (!settings.fromAudio) {
+          syncAudio(target);
+        }
+        return target;
+      }
+
+      function renderSceneChips(scenes) {
+        sceneList.replaceChildren();
+        for (let index = 0; index < scenes.length; index += 1) {
+          const scene = scenes[index];
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "scene-chip";
+          chip.dataset.sceneIndex = String(scene.scene_index);
+          chip.textContent =
+            "Escena " +
+            String(scene.scene_index + 1) +
+            " · " +
+            formatTime(scene.start_ms) +
+            " – " +
+            formatTime(scene.end_ms);
+          chip.addEventListener("click", function () {
+            seekTo(Number(scene.start_ms));
+          });
+          sceneList.appendChild(chip);
+        }
+      }
+
+      function renderWordChips(words) {
+        wordCues.replaceChildren();
+        if (!Array.isArray(words) || !words.length) {
+          const empty = document.createElement("p");
+          empty.className = "empty-words";
+          empty.textContent =
+            "No hay word_timestamps registrados para este proyecto.";
+          wordCues.appendChild(empty);
+          return;
+        }
+        for (let index = 0; index < words.length; index += 1) {
+          const word = words[index];
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "word-cue";
+          chip.dataset.startMs = String(word.start_ms);
+          chip.dataset.endMs = String(word.end_ms);
+          chip.setAttribute("data-start_ms", String(word.start_ms));
+          chip.setAttribute("data-end_ms", String(word.end_ms));
+          chip.dataset.lineIndex = String(word.line_index || 0);
+          chip.dataset.wordIndex = String(word.word_index || 0);
+          chip.textContent = word.word;
+          chip.title =
+            (word.speaker_label ? word.speaker_label + " · " : "") +
+            formatTime(word.start_ms) +
+            " – " +
+            formatTime(word.end_ms);
+          chip.addEventListener("click", function () {
+            seekTo(Number(chip.dataset.startMs));
+          });
+          wordCues.appendChild(chip);
+        }
+      }
+
+      function renderProjectSummary(manifest) {
+        const project = manifest.project || {};
+        const duration = manifestDuration(manifest);
+        projectTitle.textContent = project.title || project.id || "Proyecto";
+        projectStatus.textContent =
+          (project.status || "draft") +
+          " · " +
+          String(project.fps || 60) +
+          " FPS · " +
+          String(duration) +
+          " ms";
+        projectMeta.textContent = project.id || "";
+        projectSummary.replaceChildren();
+
+        const items = [
+          ["ID", project.id || "—"],
+          ["Resolución", String(project.width || 1080) + "×" + String(project.height || 1920)],
+          ["Duración", formatTime(duration)],
+          ["Líneas", String((manifest.lines || []).length)],
+          ["Palabras", String((manifest.words || []).length)],
+          ["Escenas", String((manifest.scenes || []).length)],
+        ];
+        for (let index = 0; index < items.length; index += 1) {
+          const row = document.createElement("span");
+          const label = document.createElement("strong");
+          label.textContent = items[index][0] + ": ";
+          row.appendChild(label);
+          row.appendChild(document.createTextNode(items[index][1]));
+          projectSummary.appendChild(row);
+        }
+
+        sceneBadge.textContent =
+          "9:16 · " +
+          String(project.width || 1080) +
+          "×" +
+          String(project.height || 1920);
+        sceneCount.textContent = String((manifest.scenes || []).length);
+        wordCount.textContent = String((manifest.words || []).length);
+      }
+
+      async function loadProject(projectId) {
+        if (!projectId) {
+          return;
+        }
+        setStatus("Cargando proyecto " + projectId + "…");
+        const manifest = await fetchJson(
+          "/api/projects/" + encodeURIComponent(projectId)
+        );
+        state.manifest = manifest;
+        state.projectId = projectId;
+        state.durationMs = manifestDuration(manifest);
+        state.activeSceneIndex = -1;
+        state.sceneLoadToken += 1;
+
+        masterAudio.pause();
+        masterAudio.removeAttribute("src");
+        masterAudio.load();
+
+        renderProjectSummary(manifest);
+        renderSceneChips(manifest.scenes || []);
+        renderWordChips(manifest.words || []);
+
+        timeline.disabled = false;
+        if (manifest.audio_url) {
+          masterAudio.src = manifest.audio_url;
+          masterAudio.load();
+          playPause.disabled = false;
+        } else {
+          playPause.disabled = true;
+        }
+        renderButton.disabled = false;
+
+        stagePlaceholder.hidden = (manifest.scenes || []).length > 0;
+        if (!(manifest.scenes || []).length) {
+          stageIframe.removeAttribute("src");
+          setStatus("El proyecto no tiene escenas registradas.", "error");
+        } else {
+          setStatus("Listo · " + String((manifest.words || []).length) + " word cues", "ok");
+        }
+
+        seekTo(0);
+        fitStage();
+
+        const url = new URL(window.location.href);
+        url.searchParams.set("project", projectId);
+        window.history.replaceState(null, "", url);
+      }
+
+      async function loadProjects(preferredId) {
+        refreshButton.disabled = true;
+        try {
+          const payload = await fetchJson("/api/projects");
+          const projects = Array.isArray(payload)
+            ? payload
+            : (payload && payload.projects) || [];
+          state.projects = projects;
+          projectSelect.replaceChildren();
+
+          if (!projects.length) {
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = "Sin proyectos";
+            projectSelect.appendChild(option);
+            projectSelect.disabled = true;
+            projectTitle.textContent = "Sin proyectos";
+            projectStatus.textContent =
+              "Crea un proyecto con la CLI o el servidor MCP para empezar.";
+            setStatus("No hay proyectos en la base de datos.", "error");
+            return;
+          }
+
+          projectSelect.disabled = false;
+          for (let index = 0; index < projects.length; index += 1) {
+            const project = projects[index];
+            const option = document.createElement("option");
+            option.value = project.id;
+            option.textContent =
+              project.title && project.title !== project.id
+                ? project.title + " (" + project.id + ")"
+                : project.id;
+            projectSelect.appendChild(option);
+          }
+
+          const requested =
+            preferredId ||
+            new URLSearchParams(window.location.search).get("project") ||
+            projects[0].id;
+          const exists = projects.some(function (project) {
+            return project.id === requested;
+          });
+          const selected = exists ? requested : projects[0].id;
+          projectSelect.value = selected;
+          await loadProject(selected);
+        } catch (error) {
+          setStatus(error.message || String(error), "error");
+          projectStatus.textContent = "Error al cargar proyectos";
+        } finally {
+          refreshButton.disabled = false;
+        }
+      }
+
+      projectSelect.addEventListener("change", function () {
+        loadProject(projectSelect.value).catch(function (error) {
+          setStatus(error.message || String(error), "error");
+        });
+      });
+
+      refreshButton.addEventListener("click", function () {
+        loadProjects(projectSelect.value).catch(function (error) {
+          setStatus(error.message || String(error), "error");
+        });
+      });
+
+      timeline.addEventListener("input", function () {
+        seekTo(Number(timeline.value));
+      });
+
+      masterAudio.addEventListener("timeupdate", function () {
+        if (!masterAudio.paused) {
+          seekTo(masterAudio.currentTime * 1000, { fromAudio: true });
+        }
+      });
+
+      masterAudio.addEventListener("play", function () {
+        playPause.textContent = "❚❚";
+        playPause.setAttribute("aria-label", "Pausar");
+      });
+
+      masterAudio.addEventListener("pause", function () {
+        playPause.textContent = "▶";
+        playPause.setAttribute("aria-label", "Reproducir");
+      });
+
+      masterAudio.addEventListener("error", function () {
+        if (!masterAudio.getAttribute("src")) {
+          return;
+        }
+        if (state.manifest && state.manifest.audio_url) {
+          setStatus("No se pudo cargar el audio maestro.", "error");
+        }
+      });
+
+      playPause.addEventListener("click", function () {
+        if (!state.manifest || !state.manifest.audio_url) {
+          return;
+        }
+        if (masterAudio.paused) {
+          masterAudio.play().catch(function (error) {
+            setStatus("No se pudo reproducir el audio: " + String(error), "error");
+          });
+        } else {
+          masterAudio.pause();
+        }
+      });
+
+      masterAudio.addEventListener("ended", function () {
+        seekTo(state.durationMs, { fromAudio: true });
+      });
+
+      renderButton.addEventListener("click", async function () {
+        if (!state.projectId) {
+          return;
+        }
+        renderButton.disabled = true;
+        state.lastRenderResponse = null;
+        state.lastRenderError = null;
+        setStatus("Renderizando MP4…");
+        try {
+          const payload = await fetchJson(
+            "/api/projects/" + encodeURIComponent(state.projectId) + "/render",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                scene_index:
+                  state.activeSceneIndex >= 0 ? state.activeSceneIndex : null,
+                burn_subtitles: true,
+              }),
+            }
+          );
+          state.lastRenderResponse = payload;
+          setStatus(
+            "Render " +
+              String(payload.status || "ok") +
+              " · job " +
+              String(payload.job_id || "—") +
+              (payload.output_mp4_path ? "\n" + payload.output_mp4_path : ""),
+            "ok"
+          );
+        } catch (error) {
+          state.lastRenderError = error.message || String(error);
+          setStatus(state.lastRenderError, "error");
+        } finally {
+          renderButton.disabled = false;
+        }
+      });
+
+      function animationLoop() {
+        if (!masterAudio.paused && state.manifest) {
+          seekTo(masterAudio.currentTime * 1000, { fromAudio: true });
+        }
+        window.requestAnimationFrame(animationLoop);
+      }
+
+      window.__previewSeek = seekTo;
+      window.__previewApplyFrame = applyFrame;
+      window.__previewRefresh = loadProjects;
+
+      if (typeof ResizeObserver === "function") {
+        new ResizeObserver(fitStage).observe(stageShell);
+      }
+      window.addEventListener("resize", fitStage);
+
+      fitStage();
+      window.requestAnimationFrame(animationLoop);
+      loadProjects().catch(function (error) {
+        setStatus(error.message || String(error), "error");
+      });
+    })();
+  </script>
+</body>
+</html>

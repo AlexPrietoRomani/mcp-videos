@@ -52,6 +52,7 @@ include = ["src/mcp_videos", "docs", "pyproject.toml"]
 target-version = "py311"
 line-length = 100
 src = ["src", "tests"]
+extend-exclude = ["scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "C4", "RUF"]
