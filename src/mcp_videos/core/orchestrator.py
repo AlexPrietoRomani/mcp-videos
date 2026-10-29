@@ -432,10 +432,20 @@ class ProjectOrchestrator:
         project_id: str,
         *,
         burn_subtitles: bool = True,
+        fps: int | None = None,
     ) -> dict[str, Any]:
         """Render every validated scene into the project ``final.mp4``."""
 
         project = self.projects.get_or_raise(project_id)
+        if fps is not None:
+            project = Project.model_validate(
+                {
+                    **project.model_dump(),
+                    "fps": fps,
+                    "updated_at": datetime.now(UTC),
+                }
+            )
+            project = self.projects.save(project)
         scenes = self.scenes.list_by_project(project_id)
         result = self.render_engine.render_project(
             project,

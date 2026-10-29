@@ -206,6 +206,21 @@ class TestVoiceRegistry:
         with pytest.raises(VoiceRegistryError, match="clone"):
             registry.register_clone("clon-kokoro", "Kokoro", sample, engine="kokoro")
 
+    def test_edge_tts_preset_can_be_registered(
+        self,
+        registry: VoiceRegistryService,
+        db: DatabaseManager,
+    ) -> None:
+        voice = registry.register_preset(
+            "preset-edge-es",
+            "Edge Español",
+            engine="edge_tts",
+            config={"voice_code": "es-ES-ElviraNeural", "rate": "+8%"},
+        )
+
+        assert voice.engine.value == "edge_tts"
+        assert VoiceRepository(db).get("preset-edge-es") == voice
+
     def test_seed_defaults_cover_spanish_and_english_idempotently(
         self,
         registry: VoiceRegistryService,

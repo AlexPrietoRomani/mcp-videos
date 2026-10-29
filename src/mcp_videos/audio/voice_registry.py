@@ -20,6 +20,7 @@ PRESET_ENGINES = frozenset(
     {
         VoiceEngine.KOKORO,
         VoiceEngine.PIPER,
+        VoiceEngine.EDGE_TTS,
         VoiceEngine.ELEVENLABS,
         VoiceEngine.OPENAI,
     }

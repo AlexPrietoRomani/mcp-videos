@@ -363,6 +363,7 @@ class TestProviderFactory:
         [
             ("kokoro", "preset", False, PresetLocalProvider),
             ("piper", "preset", False, PresetLocalProvider),
+            ("edge_tts", "preset", False, PresetLocalProvider),
             ("xtts", "clone", True, ZeroShotCloneProvider),
             ("f5", "clone", True, ZeroShotCloneProvider),
             ("elevenlabs", "preset", False, CloudAPITTSProvider),
@@ -379,7 +380,7 @@ class TestProviderFactory:
         expected: type,
     ) -> None:
         voice = VoiceProfile(
-            id=f"voz-{engine}",
+            id=f"voz-{engine.replace('_', '-')}",
             name=engine,
             engine=engine,
             mode=mode,
@@ -455,6 +456,83 @@ class TestPresetLocalProvider:
         fast = provider.synthesize_to_wav("Una frase de prueba.", fast_voice, tmp_path / "f.wav")
 
         assert get_wav_duration_ms(slow) > get_wav_duration_ms(fast)
+
+    def test_edge_tts_uses_configured_voice_and_canonicalizes_audio(
+        self,
+        tmp_path: Path,
+        settings: AppSettings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import edge_tts
+
+        calls: list[dict[str, object]] = []
+
+        def fake_save_sync(
+            communicate: object,
+            audio_fname: str | Path,
+            metadata_fname: str | Path | None = None,
+        ) -> None:
+            calls.append(
+                {
+                    "voice": communicate.tts_config.voice,
+                    "rate": communicate.tts_config.rate,
+                }
+            )
+            write_tone(Path(audio_fname), 600)
+
+        monkeypatch.setattr(edge_tts.Communicate, "save_sync", fake_save_sync)
+        voice = VoiceProfile(
+            id="voz-edge",
+            name="Edge",
+            engine="edge_tts",
+            mode="preset",
+            config={"voice_code": "es-ES-AlvaroNeural", "rate": "+12%"},
+        )
+
+        target = PresetLocalProvider(settings).synthesize_to_wav(
+            "Hola desde Edge.",
+            voice,
+            tmp_path / "edge.wav",
+        )
+
+        assert calls and "AlvaroNeural" in str(calls[0]["voice"])
+        assert calls[0]["rate"] == "+12%"
+        _, params = read_samples(target)
+        assert params.framerate == SAMPLE_RATE
+        assert params.nchannels == 1
+        assert 550 <= get_wav_duration_ms(target) <= 650
+
+    def test_edge_tts_failure_falls_back_to_local_synthesis(
+        self,
+        tmp_path: Path,
+        settings: AppSettings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import edge_tts
+
+        def offline_save_sync(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("sin red")
+
+        monkeypatch.setattr(edge_tts.Communicate, "save_sync", offline_save_sync)
+        voice = VoiceProfile(
+            id="voz-edge-offline",
+            name="Edge offline",
+            engine="edge_tts",
+            mode="preset",
+            config={"voice_code": "es-ES-ElviraNeural"},
+        )
+
+        target = PresetLocalProvider(settings).synthesize_to_wav(
+            "El fallback local debe sonar.",
+            voice,
+            tmp_path / "fallback.wav",
+        )
+
+        assert target.is_file()
+        assert rms(target) > 0.01
+        _, params = read_samples(target)
+        assert params.framerate == SAMPLE_RATE
+        assert params.nchannels == 1
 
     def test_blank_text_is_rejected(
         self,

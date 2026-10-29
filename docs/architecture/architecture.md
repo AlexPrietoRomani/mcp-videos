@@ -21,7 +21,7 @@ flowchart TB
 
     subgraph Externas["🛢️ Motores de IA (Locales y APIs)"]
         LLM_EXT["Modelos LLM (Ollama / vLLM / Claude / Gemini / OpenAI)"]
-        TTS_EXT["Motores de Voz y Alineación\n(Kokoro / Piper / XTTS-v2 / F5-TTS / faster-whisper / ElevenLabs)"]
+        TTS_EXT["Motores de Voz y Alineación\n(Edge-TTS / Kokoro / Piper / XTTS-v2 / F5-TTS / faster-whisper / ElevenLabs)"]
     end
 
     subgraph Consumo["📊 Almacenamiento Local"]
@@ -44,7 +44,7 @@ flowchart TB
 - **Motor de persistencia:** Se eligió **SQLite en modo WAL (`data/mcp_videos.sqlite`) combinado con directorios de workspace en disco (`workspaces/<slug>/`)** porque coordina transaccionalmente los metadatos temporales (`start_ms`, `end_ms`, `word_timestamps`) mientras mantiene los binarios multimedia (`.wav`, `.html`, `.mp4`) accesibles directamente por FFmpeg y Chromium. Se descartó guardar blobs binarios en la base de datos por penalización de E/S y tamaño.
 - **Separación de interfaces ↔ núcleo de dominio:** Se eligió un **núcleo desacoplado en Python (`src/mcp_videos/core/`)** consumido simultáneamente por tres adaptadores de entrada: Servidor MCP (`FastMCP`), CLI (`Typer`) y Estudio Web (`FastAPI`). Se descartó acoplar la lógica de renderizado dentro de los handlers MCP para permitir ejecuciones por lotes en CLI y CI/CD sin agente.
 - **Sincronización Audio-First y Reloj Virtual Determinista:** Se eligió **generar y medir primero el audio del diálogo y sus marcas de tiempo por palabra (`faster-whisper`)**, e inyectar un reloj virtual (`window.__setFrameTime(t)`) en el HTML capturado frame a frame con Playwright hacia FFmpeg. Se descartó la grabación de pantalla en tiempo real (`recordVideo`) porque produce caída de frames en hardware sin GPU dedicada y desincronización progresiva con la voz.
-- **Abstracción híbrida Local/API para Voz y LLMs:** Se eligió un **patrón de adaptadores intercambiables** que permite operar 100% offline (con `Kokoro-ONNX`/`Piper` para diálogo rápido en CPU, `XTTS-v2`/`F5-TTS` para clonación de voz y `Ollama` para generación de escenas HTML) o delegar selectivamente en APIs (`Anthropic`, `Gemini`, `OpenAI`, `ElevenLabs`) mediante configuración en `.env`.
+- **Abstracción híbrida Local/API para Voz y LLMs:** Se eligió un **patrón de adaptadores intercambiables** que permite operar 100% offline (con `Kokoro-ONNX`/`Piper` para diálogo rápido en CPU, `XTTS-v2`/`F5-TTS` para clonación de voz y `Ollama` para generación de escenas HTML), usar `Edge-TTS` como voz preset neuronal con fallback local, o delegar selectivamente en APIs (`Anthropic`, `Gemini`, `OpenAI`, `ElevenLabs`) mediante configuración en `.env`.
 
 ---
 
@@ -382,7 +382,7 @@ erDiagram
     voices {
         TEXT id PK "slug de la voz"
         TEXT name
-        TEXT engine "kokoro | piper | xtts | f5 | elevenlabs | openai"
+        TEXT engine "kokoro | piper | edge_tts | xtts | f5 | elevenlabs | openai"
         TEXT mode "preset | clone"
         TEXT language "es | en"
         TEXT sample_wav_path "NULL si preset"
@@ -491,7 +491,7 @@ flowchart LR
 **Notas de despliegue y operación:**
 - **Bundle del repositorio:** Entra al control de versiones el código fuente (`src/mcp_videos/`), migraciones SQL (`src/mcp_videos/db/migrations/`), plantillas base de escenas HTML/JS (`src/mcp_videos/scenes/templates/`), tests (`tests/`) y la especificación compartible (`docs/description_proyecto.md`, `docs/architecture/`, `docs/db/`, `docs/ejecucion.md`). Se excluyen `data/`, `workspaces/`, `.venv/` y archivos de trabajo internos si `VERSION_WORK=no`.
 - **Credenciales:** Se administran exclusivamente mediante `.env` local (basado en `.env.example`), nunca en el código ni en SQLite.
-- **Ejecución de modelos locales en CPU / iGPU:** En máquinas sin GPU NVIDIA dedicada, el sistema opera sin configuración extra usando `kokoro-onnx`/`piper` para síntesis rápida y `faster-whisper` en `int8`, descargando los pesos bajo demanda en la caché del usuario.
+- **Ejecución de modelos locales en CPU / iGPU:** En máquinas sin GPU NVIDIA dedicada, el sistema opera sin configuración extra usando `edge-tts`/`kokoro-onnx`/`piper` para síntesis rápida y `faster-whisper` en `int8`, descargando los pesos bajo demanda en la caché del usuario.
 
 ---
 

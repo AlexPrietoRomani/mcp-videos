@@ -32,7 +32,7 @@ erDiagram
     voices {
         TEXT id PK "slug único (ej. kokoro-es-m1, clon-alex)"
         TEXT name "nombre legible"
-        TEXT engine "kokoro | piper | xtts | f5 | elevenlabs | openai"
+        TEXT engine "kokoro | piper | edge_tts | xtts | f5 | elevenlabs | openai"
         TEXT mode "preset | clone"
         TEXT language "es | en"
         TEXT sample_wav_path "NULL en preset; ruta en data/voices/ para clone"
@@ -144,7 +144,7 @@ erDiagram
 |---|---|---|---|---|
 | `id` | `TEXT` | Slug `[a-z0-9-]+` | `PRIMARY KEY` | Ej: `kokoro-es-dora`, `clon-narrador` |
 | `name` | `TEXT` | Texto libre | `NOT NULL` | Nombre descriptivo de la voz |
-| `engine` | `TEXT` | `'kokoro' \| 'piper' \| 'xtts' \| 'f5' \| 'elevenlabs' \| 'openai'` | `NOT NULL CHECK(...)` | Motor de síntesis responsable |
+| `engine` | `TEXT` | `'kokoro' \| 'piper' \| 'edge_tts' \| 'xtts' \| 'f5' \| 'elevenlabs' \| 'openai'` | `NOT NULL CHECK(...)` | Motor de síntesis responsable |
 | `mode` | `TEXT` | `'preset' \| 'clone'` | `NOT NULL CHECK(...)` | Predefinida del motor o clonada desde muestra |
 | `language` | `TEXT` | Código ISO (`'es'`, `'en'`) | `NOT NULL DEFAULT 'es'` | Idioma principal de síntesis |
 | `sample_wav_path` | `TEXT` | Ruta relativa en `data/voices/` | `NULL` en `preset`; obligatorio si `mode = 'clone'` | Validado por `CHECK (mode = 'preset' OR sample_wav_path IS NOT NULL)` |
@@ -245,11 +245,11 @@ erDiagram
 
 En la tabla `voices`, el esquema es homogéneo pero el significado de `sample_wav_path` y los campos de `config_json` varían intencionalmente según el motor (`engine`) y el modo (`mode`):
 
-| Campo / Columna | `kokoro` / `piper` (`preset`) | `xtts` / `f5` (`clone`) | `elevenlabs` / `openai` (`preset` o `clone`) |
+| Campo / Columna | `kokoro` / `piper` / `edge_tts` (`preset`) | `xtts` / `f5` (`clone`) | `elevenlabs` / `openai` (`preset` o `clone`) |
 |---|---|---|---|
 | `sample_wav_path` | `NULL` (usa pesos internos ONNX) | **Obligatorio** (`data/voices/<id>.wav`, 24 kHz mono) | `NULL` (usa `voice_id` remoto en la nube) |
-| `config_json.voice_code` | Código interno (ej. `ef_dora`, `em_alex`) | `NULL` | ID de voz en la API (ej. `alloy`, `21m00Tcm4TlvDq8ikWAM`) |
-| `config_json.speed` | `REAL` (`0.7` a `1.5`, default `1.0`) | `REAL` (`0.8` a `1.3`, default `1.0`) | `REAL` (`0.7` a `1.2`, default `1.0`) |
+| `config_json.voice_code` | Código interno (ej. `ef_dora`, `em_alex`, `es-ES-ElviraNeural`) | `NULL` | ID de voz en la API (ej. `alloy`, `21m00Tcm4TlvDq8ikWAM`) |
+| `config_json.speed` / `rate` | `REAL` (`0.7` a `1.5`, default `1.0`); `edge_tts` acepta `rate` ASS (ej. `+15%`) | `REAL` (`0.8` a `1.3`, default `1.0`) | `REAL` (`0.7` a `1.2`, default `1.0`) |
 | `config_json.ref_text` | `NULL` | Transcripción exacta del `.wav` semilla (requerido por `F5-TTS`) | `NULL` |
 
 > El esquema homogéneo en `voices` permite que `dialogue_lines` referencie cualquier `voice_id` sin importar si un personaje del diálogo usa una voz local predefinida en CPU, una voz clonada zero-shot o una voz de API.

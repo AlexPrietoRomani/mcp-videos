@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import logging
 import math
 import os
 import re
@@ -27,9 +28,16 @@ from mcp_videos.audio.ffmpeg_utils import (
 from mcp_videos.config import AppSettings
 from mcp_videos.core.models import VoiceEngine, VoiceMode, VoiceProfile
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_F0_HZ = 165.0
 MIN_F0_HZ = 60.0
 MAX_F0_HZ = 400.0
+EDGE_TTS_DEFAULT_VOICES = {
+    "es": "es-ES-ElviraNeural",
+    "en": "en-US-AriaNeural",
+}
+EDGE_TTS_DEFAULT_TIMEOUT_S = 60.0
 ELEVENLABS_ENDPOINT = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 OPENAI_SPEECH_ENDPOINT = "https://api.openai.com/v1/audio/speech"
 VOWEL_FORMANTS: dict[str, tuple[float, float, float]] = {
@@ -484,6 +492,10 @@ class PresetLocalProvider(TTSProvider):
         )
 
         engine = _resolve_engine(voice)
+        if engine is VoiceEngine.EDGE_TTS and self._synthesize_edge_tts(
+            content, voice, target, speed
+        ):
+            return target
         if engine is VoiceEngine.KOKORO and self._synthesize_kokoro(content, voice, target, speed):
             return target
         if engine is VoiceEngine.PIPER and self._synthesize_piper(content, voice, target):
@@ -564,6 +576,69 @@ class PresetLocalProvider(TTSProvider):
         try:
             convert_to_pcm_wav(target, temporary, sample_rate=SAMPLE_RATE_HZ)
             target.write_bytes(temporary.read_bytes())
+        finally:
+            temporary.unlink(missing_ok=True)
+        return True
+
+    def _synthesize_edge_tts(
+        self,
+        text: str,
+        voice: VoiceProfile,
+        target: Path,
+        speed: float,
+    ) -> bool:
+        """Try Edge-TTS first and return ``False`` so the caller can fall back offline."""
+
+        try:
+            import edge_tts
+        except ImportError:
+            logger.warning("edge-tts no está instalado; se usará la síntesis local")
+            return False
+
+        voice_code = str(
+            voice.config.get("voice_code")
+            or voice.config.get("voice")
+            or voice.config.get("speaker_id")
+            or EDGE_TTS_DEFAULT_VOICES.get(voice.language.value, "es-ES-ElviraNeural")
+        )
+        configured_rate = voice.config.get("rate") or voice.config.get("edge_rate")
+        if isinstance(configured_rate, str) and configured_rate.strip():
+            rate = configured_rate.strip()
+        else:
+            rate = f"{round((speed - 1.0) * 100):+d}%"
+        volume = str(voice.config.get("volume") or voice.config.get("edge_volume") or "+0%")
+        pitch = str(voice.config.get("pitch") or voice.config.get("edge_pitch") or "+0Hz")
+        receive_timeout = int(
+            _config_float(
+                voice.config,
+                ("receive_timeout", "edge_timeout_s", "timeout_s"),
+                EDGE_TTS_DEFAULT_TIMEOUT_S,
+                minimum=5.0,
+                maximum=180.0,
+            )
+        )
+
+        temporary = _write_temporary_audio(".mp3")
+        try:
+            try:
+                communicate = edge_tts.Communicate(
+                    text,
+                    voice_code,
+                    rate=rate,
+                    volume=volume,
+                    pitch=pitch,
+                    receive_timeout=receive_timeout,
+                )
+                communicate.save_sync(str(temporary))
+                if not temporary.is_file() or temporary.stat().st_size == 0:
+                    raise TTSProviderError("edge-tts devolvió un archivo de audio vacío")
+                convert_to_pcm_wav(temporary, target, sample_rate=SAMPLE_RATE_HZ)
+            except Exception as exc:
+                logger.warning(
+                    "edge-tts falló (%s); se usará el fallback local determinista",
+                    exc,
+                )
+                return False
         finally:
             temporary.unlink(missing_ok=True)
         return True

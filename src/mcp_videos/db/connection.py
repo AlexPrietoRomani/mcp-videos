@@ -106,6 +106,9 @@ class DatabaseManager:
 
         applied: list[str] = []
         with self.connection() as conn:
+            # SQLite cannot toggle foreign_keys inside a transaction, and table
+            # rebuild migrations need it disabled before BEGIN.
+            conn.execute("PRAGMA foreign_keys = OFF")
             conn.execute("BEGIN IMMEDIATE")
             try:
                 conn.execute(_MIGRATIONS_TABLE_DDL)
@@ -128,6 +131,8 @@ class DatabaseManager:
             except BaseException:
                 conn.rollback()
                 raise
+            finally:
+                conn.execute("PRAGMA foreign_keys = ON")
         return applied
 
     def migrate(self) -> list[str]:

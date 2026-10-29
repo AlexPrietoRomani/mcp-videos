@@ -186,6 +186,7 @@ class StubRenderEngine:
                 "project_id": project.id,
                 "scene_count": len(scenes),
                 "burn_subtitles": burn_subtitles,
+                "fps": project.fps,
             }
         )
         output_path = self.workspace.final_mp4_path(project.id)
@@ -438,6 +439,28 @@ class TestRenderAndDemoOrchestration:
         engine = orchestrator.render_engine
         assert isinstance(engine, StubRenderEngine)
         assert engine.calls[0]["burn_subtitles"] is True
+
+    def test_render_project_can_override_and_persist_fps(
+        self,
+        orchestrator: ProjectOrchestrator,
+    ) -> None:
+        prepare_audio(orchestrator)
+        orchestrator.save_and_validate_scene(
+            PROJECT_ID,
+            0,
+            "Hook",
+            0,
+            TOTAL_DURATION_MS,
+            html_content="<html><body>Hook</body></html>",
+        )
+
+        payload = orchestrator.render_project(PROJECT_ID, burn_subtitles=False, fps=30)
+
+        assert payload["fps"] == 30
+        assert orchestrator.get_project(PROJECT_ID).fps == 30
+        engine = orchestrator.render_engine
+        assert isinstance(engine, StubRenderEngine)
+        assert engine.calls[0]["fps"] == 30
 
     def test_build_demo_short_without_render_creates_valid_scenes(
         self,

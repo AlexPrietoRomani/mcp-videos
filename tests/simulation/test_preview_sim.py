@@ -44,6 +44,48 @@ PROJECT_ID = "short-preview-sim"
 VOICE_ID = "preset-preview-sim-es"
 TOTAL_DURATION_MS = 4000
 JOB_ID = "33333333-3333-4333-8333-333333333333"
+FORECASTING_PROJECT_ID = "charla-forecasting-preview"
+FORECASTING_TITLE = "¿Puede la IA predecir el futuro?"
+FORECASTING_DURATION_MS = 26000
+FORECASTING_SCENE_RANGES: tuple[tuple[int, int], ...] = (
+    (0, 5000),
+    (5000, 12000),
+    (12000, 19000),
+    (19000, 26000),
+)
+FORECASTING_SCENE_TITLES = (
+    "La pregunta",
+    "Patrones en datos",
+    "Causalidad y contexto",
+    "Predicción probabilística",
+)
+FORECASTING_WORDS: tuple[tuple[int, str, int, int], ...] = (
+    (0, "¿Puede", 0, 700),
+    (1, "la", 800, 1000),
+    (2, "IA", 1100, 1600),
+    (3, "predecir", 1700, 2600),
+    (4, "el", 2700, 2900),
+    (5, "futuro?", 3000, 4400),
+    (6, "Los", 5100, 5400),
+    (7, "modelos", 5500, 6200),
+    (8, "detectan", 6300, 7100),
+    (9, "patrones", 7200, 8200),
+    (10, "en", 8300, 8500),
+    (11, "datos", 8600, 9200),
+    (12, "históricos", 9300, 10400),
+    (13, "Pero", 12100, 12500),
+    (14, "no", 12600, 12800),
+    (15, "comprenden", 12900, 13900),
+    (16, "causalidad", 14000, 15200),
+    (17, "ni", 15300, 15500),
+    (18, "contexto", 15600, 16800),
+    (19, "La", 19100, 19300),
+    (20, "predicción", 19400, 20500),
+    (21, "es", 20600, 20800),
+    (22, "probabilística", 20900, 22300),
+    (23, "nunca", 22400, 22900),
+    (24, "certeza", 23000, 24500),
+)
 
 SCENE_TEMPLATE = """<!DOCTYPE html>
 <html lang="es">
@@ -57,7 +99,9 @@ SCENE_TEMPLATE = """<!DOCTYPE html>
 <body data-scene="__SCENE_INDEX__">
   <div id="frame-time">0</div>
   <script>
+    window.__frameCalls = [];
     window.onFrameTime = function (timeMs) {
+      window.__frameCalls.push(Math.round(timeMs));
       document.getElementById("frame-time").textContent = String(Math.round(timeMs));
       document.body.dataset.frameTime = String(Math.round(timeMs));
     };
@@ -121,6 +165,80 @@ def launch_chromium(playwright: object) -> object:
         if executable is None:
             pytest.skip(f"Chromium no disponible: {bundled_error}")
         return playwright.chromium.launch(headless=True, executable_path=executable)
+
+
+def prepare_forecasting_project(
+    projects: ProjectRepository,
+    dialogues: DialogueRepository,
+    scenes: SceneRepository,
+    workspace: WorkspaceManager,
+) -> None:
+    projects.create(
+        Project(
+            id=FORECASTING_PROJECT_ID,
+            title=FORECASTING_TITLE,
+            description="Charla de simulación con cuatro escenas encadenadas.",
+            width=1080,
+            height=1920,
+            fps=60,
+            total_duration_ms=FORECASTING_DURATION_MS,
+            master_audio_path="audio/dialogue_master.wav",
+            status="scenes_ready",
+        )
+    )
+    write_silence_wav(
+        workspace.dialogue_master_path(FORECASTING_PROJECT_ID),
+        FORECASTING_DURATION_MS,
+    )
+    line = dialogues.insert_line(
+        DialogueLine(
+            project_id=FORECASTING_PROJECT_ID,
+            line_index=0,
+            voice_id=VOICE_ID,
+            speaker_label="NARRADOR",
+            text_content=(
+                "¿Puede la IA predecir el futuro? Los modelos detectan patrones "
+                "en datos históricos. Pero no comprenden causalidad ni contexto. "
+                "La predicción es probabilística: nunca certeza."
+            ),
+            pause_after_ms=100,
+            start_ms=0,
+            end_ms=FORECASTING_DURATION_MS,
+            audio_path="audio/line_00.wav",
+        )
+    )
+    assert line.id is not None
+    dialogues.insert_word_timestamps(
+        line.id,
+        [
+            WordTimestamp(
+                word_index=word_index,
+                word=word,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                confidence=0.99 - word_index * 0.001,
+            )
+            for word_index, word, start_ms, end_ms in FORECASTING_WORDS
+        ],
+    )
+
+    for index, (start_ms, end_ms) in enumerate(FORECASTING_SCENE_RANGES):
+        workspace.write_scene_html(
+            FORECASTING_PROJECT_ID,
+            index,
+            SCENE_TEMPLATE.replace("__SCENE_INDEX__", str(index)),
+        )
+        scenes.upsert(
+            Scene(
+                project_id=FORECASTING_PROJECT_ID,
+                scene_index=index,
+                title=FORECASTING_SCENE_TITLES[index],
+                start_ms=start_ms,
+                end_ms=end_ms,
+                html_path=f"scenes/scene_{index:02d}.html",
+                validation_status="valid",
+            )
+        )
 
 
 def prepare_environment(tmp_path: Path) -> tuple[DatabaseManager, WorkspaceManager]:
@@ -222,6 +340,7 @@ def prepare_environment(tmp_path: Path) -> tuple[DatabaseManager, WorkspaceManag
             )
         )
 
+    prepare_forecasting_project(projects, dialogues, scenes, workspace)
     return db, workspace
 
 
@@ -282,6 +401,168 @@ def iframe_label(page: object) -> str:
     )
 
 
+def open_forecasting_preview(page: object, base_url: str) -> None:
+    page.goto(
+        f"{base_url}/?project={FORECASTING_PROJECT_ID}",
+        wait_until="domcontentloaded",
+    )
+    page.wait_for_selector(".word-cue", state="attached")
+    page.wait_for_function(
+        "(projectId) => Boolean("
+        "  window.__previewState"
+        "  && window.__previewState.manifest !== null"
+        "  && window.__previewState.projectId === projectId"
+        ")",
+        arg=FORECASTING_PROJECT_ID,
+    )
+
+
+def seek_slider(page: object, time_ms: int) -> None:
+    page.evaluate(
+        "(value) => {"
+        "  const slider = document.getElementById('timeline');"
+        "  slider.value = String(value);"
+        "  slider.dispatchEvent(new Event('input', { bubbles: true }));"
+        "}",
+        time_ms,
+    )
+
+
+def wait_for_active_scene(
+    page: object,
+    scene_index: int,
+    local_ms: float,
+    project_id: str = FORECASTING_PROJECT_ID,
+) -> None:
+    page.wait_for_function(
+        "([sceneIndex, localMs, expectedSrc]) => {"
+        "  const frame = document.getElementById('stage-iframe');"
+        "  if (!frame) { return false; }"
+        "  const win = frame.contentWindow;"
+        "  return window.__previewState.activeSceneIndex === sceneIndex"
+        "    && frame.getAttribute('src') === expectedSrc"
+        "    && Boolean(win)"
+        "    && typeof win.__setFrameTime === 'function'"
+        "    && Math.abs(win.__currentTimeMs - localMs) < 1;"
+        "}",
+        arg=[scene_index, local_ms, f"/preview/{project_id}/scene/{scene_index}"],
+    )
+
+
+def test_four_scene_scrubber_and_word_cues_map_local_time(
+    running_preview: RunningPreview,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = launch_chromium(playwright)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            open_forecasting_preview(page, running_preview.base_url)
+
+            assert page.locator(".scene-chip").count() == 4
+            assert page.locator(".word-cue").count() == len(FORECASTING_WORDS)
+            manifest = page.evaluate("() => window.__previewState.manifest")
+            assert manifest["project"]["title"] == FORECASTING_TITLE
+            assert manifest["total_duration_ms"] == FORECASTING_DURATION_MS
+            assert [(scene["start_ms"], scene["end_ms"]) for scene in manifest["scenes"]] == list(
+                FORECASTING_SCENE_RANGES
+            )
+
+            wait_for_active_scene(page, 0, 0)
+
+            scrub_cases = (
+                (2500, 0, 2500),
+                (4999, 0, 4999),
+                (5000, 1, 0),
+                (7500, 1, 2500),
+                (11999, 1, 6999),
+                (12000, 2, 0),
+                (15432, 2, 3432),
+                (19000, 3, 0),
+                (21000, 3, 2000),
+                (26000, 3, 7000),
+            )
+            for global_ms, scene_index, local_ms in scrub_cases:
+                seek_slider(page, global_ms)
+                wait_for_active_scene(page, scene_index, local_ms)
+                assert iframe_clock(page) == pytest.approx(local_ms)
+                assert iframe_label(page) == str(local_ms)
+                assert page.evaluate("() => window.__previewState.currentTimeMs") == global_ms
+                assert page.evaluate("() => window.__previewState.loadedSceneIndex") == scene_index
+
+            word_cases = (
+                (3000, 0, 3000),
+                (7200, 1, 2200),
+                (14000, 2, 2000),
+                (20900, 3, 1900),
+            )
+            for word_start, scene_index, local_ms in word_cases:
+                cue = page.locator(f'.word-cue[data-start-ms="{word_start}"]')
+                cue.click()
+                wait_for_active_scene(page, scene_index, local_ms)
+                assert iframe_clock(page) == pytest.approx(local_ms)
+                assert cue.evaluate("(element) => element.classList.contains('active')")
+                assert page.evaluate("() => window.__previewState.currentTimeMs") == word_start
+
+            scene_chip = page.locator('.scene-chip[data-scene-index="2"]')
+            scene_chip.click()
+            wait_for_active_scene(page, 2, 0)
+            assert page.evaluate("() => window.__previewState.currentTimeMs") == 12000
+            assert scene_chip.evaluate("(element) => element.classList.contains('active')")
+
+            page.evaluate(
+                "() => {"
+                "  const slider = document.getElementById('timeline');"
+                "  for (const value of [500, 7500, 21000, 13000, 3000, 19500]) {"
+                "    slider.value = String(value);"
+                "    slider.dispatchEvent(new Event('input', { bubbles: true }));"
+                "  }"
+                "}"
+            )
+            wait_for_active_scene(page, 3, 500)
+            page.wait_for_timeout(250)
+            assert iframe_clock(page) == pytest.approx(500)
+            assert page.evaluate("() => window.__previewState.activeSceneIndex") == 3
+        finally:
+            browser.close()
+
+
+def test_scene_switch_discards_stale_frame_retries(
+    running_preview: RunningPreview,
+) -> None:
+    with sync_playwright() as playwright:
+        browser = launch_chromium(playwright)
+        try:
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            open_forecasting_preview(page, running_preview.base_url)
+            wait_for_active_scene(page, 0, 0)
+
+            deleted = page.evaluate(
+                "() => {"
+                "  const frame = document.getElementById('stage-iframe');"
+                "  const win = frame.contentWindow;"
+                "  let removed = false;"
+                "  try { removed = delete win.__setFrameTime; } catch (error) {"
+                "    removed = false;"
+                "  }"
+                "  window.__previewApplyFrame(123);"
+                "  window.__previewSeek(7500);"
+                "  return removed;"
+                "}"
+            )
+            assert deleted is True
+
+            wait_for_active_scene(page, 1, 2500)
+            page.wait_for_timeout(300)
+            assert iframe_clock(page) == pytest.approx(2500)
+            calls = page.evaluate(
+                "() => document.getElementById('stage-iframe').contentWindow.__frameCalls"
+            )
+            assert 123 not in calls
+            assert calls[-1] == 2500
+        finally:
+            browser.close()
+
+
 def test_scrubber_and_word_cue_click_update_stage_and_render(
     running_preview: RunningPreview,
 ) -> None:
@@ -289,7 +570,10 @@ def test_scrubber_and_word_cue_click_update_stage_and_render(
         browser = launch_chromium(playwright)
         try:
             page = browser.new_page(viewport={"width": 1440, "height": 1000})
-            page.goto(running_preview.base_url, wait_until="domcontentloaded")
+            page.goto(
+                f"{running_preview.base_url}/?project={PROJECT_ID}",
+                wait_until="domcontentloaded",
+            )
             page.wait_for_selector(".word-cue", state="attached")
             page.wait_for_function(
                 "() => window.__previewState && window.__previewState.manifest !== null"

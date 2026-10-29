@@ -165,11 +165,13 @@ class FakeOrchestrator:
         project_id: str,
         *,
         burn_subtitles: bool = True,
+        fps: int | None = None,
     ) -> dict[str, Any]:
         self._record(
             "render_project",
             project_id=project_id,
             burn_subtitles=burn_subtitles,
+            fps=fps,
         )
         return {
             "job_id": "job-1",
@@ -292,9 +294,42 @@ class TestMcpServer:
 
         assert created["project_id"] == "short-mcp"
         assert created["width"] == 360
+        assert fake.calls[0]["description"] == ""
         assert synthesis["status"] == "audio_ready"
         assert synthesis["lines_count"] == 1
         assert fake.calls[1]["turns"] == turns
+
+    def test_create_project_accepts_topic_as_description(
+        self,
+        fake: FakeOrchestrator,
+    ) -> None:
+        created = mcp_payload(
+            call_tool(
+                "create_project",
+                {
+                    "project_id": "short-tema",
+                    "title": "Forecasting",
+                    "topic": "Cono de incertidumbre y café",
+                },
+            )
+        )
+
+        assert created["project_id"] == "short-tema"
+        assert fake.calls[0]["description"] == "Cono de incertidumbre y café"
+
+    def test_render_tool_accepts_fps_override(
+        self,
+        fake: FakeOrchestrator,
+    ) -> None:
+        rendered = mcp_payload(
+            call_tool(
+                "render_project_video",
+                {"project_id": "short-mcp", "burn_subtitles": True, "fps": 30},
+            )
+        )
+
+        assert rendered["status"] == "completed"
+        assert fake.calls[0]["fps"] == 30
 
     def test_save_scene_and_render_tools_forward_arguments(
         self,

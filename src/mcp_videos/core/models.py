@@ -33,6 +33,7 @@ class VoiceEngine(StrEnum):
 
     KOKORO = "kokoro"
     PIPER = "piper"
+    EDGE_TTS = "edge_tts"
     XTTS = "xtts"
     F5 = "f5"
     ELEVENLABS = "elevenlabs"

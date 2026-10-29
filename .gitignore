@@ -21,6 +21,7 @@ build/
 # Datos locales, muestras de voz y workspaces multimedia (no se versionan)
 data/
 workspaces/
+projects/
 
 # Archivos de trabajo locales de project-suite (VERSION_WORK=no)
 docs/task/

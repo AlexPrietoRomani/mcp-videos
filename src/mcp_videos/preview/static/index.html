@@ -640,6 +640,7 @@
         currentTimeMs: 0,
         durationMs: 0,
         activeSceneIndex: -1,
+        loadedSceneIndex: -1,
         lastFrameTimeMs: 0,
         pendingLocalMs: 0,
         stageScale: 1,
@@ -739,46 +740,88 @@
         if (!scenes.length) {
           return null;
         }
+        let lastStarted = null;
+        let firstScene = scenes[0];
+        let firstStart = Number(firstScene.start_ms) || 0;
         for (let index = 0; index < scenes.length; index += 1) {
-          if (timeMs < scenes[index].end_ms) {
-            return scenes[index];
+          const scene = scenes[index];
+          const start = Number(scene.start_ms) || 0;
+          const end = Number(scene.end_ms) || 0;
+          if (start < firstStart) {
+            firstStart = start;
+            firstScene = scene;
+          }
+          if (timeMs >= start && timeMs < end) {
+            return scene;
+          }
+          if (start <= timeMs) {
+            lastStarted = scene;
           }
         }
-        return scenes[scenes.length - 1];
+        return lastStarted || firstScene;
       }
 
-      function applyFrame(localMs, attempt) {
+      function applyFrame(localMs, attempt, token) {
+        const loadToken = typeof token === "number" ? token : state.sceneLoadToken;
+        if (loadToken !== state.sceneLoadToken) {
+          return false;
+        }
         const value = Math.max(0, Number(localMs) || 0);
         state.lastFrameTimeMs = value;
         let applied = false;
-        try {
-          const targetWindow = stageIframe.contentWindow;
-          if (targetWindow && typeof targetWindow.__setFrameTime === "function") {
-            targetWindow.__setFrameTime(value);
-            applied = true;
+        if (
+          state.activeSceneIndex >= 0 &&
+          state.loadedSceneIndex === state.activeSceneIndex
+        ) {
+          try {
+            const targetWindow = stageIframe.contentWindow;
+            if (targetWindow && typeof targetWindow.__setFrameTime === "function") {
+              targetWindow.__setFrameTime(value);
+              applied = true;
+            }
+          } catch (error) {
+            applied = false;
           }
-        } catch (error) {
-          applied = false;
         }
         const retries = typeof attempt === "number" ? attempt : 0;
         if (!applied && retries < 120 && state.manifest) {
           window.requestAnimationFrame(function () {
-            applyFrame(value, retries + 1);
+            if (loadToken !== state.sceneLoadToken) {
+              return;
+            }
+            applyFrame(state.pendingLocalMs, retries + 1, loadToken);
           });
         }
         return applied;
       }
 
+      function unmountScene() {
+        state.activeSceneIndex = -1;
+        state.loadedSceneIndex = -1;
+        state.pendingLocalMs = 0;
+        state.lastFrameTimeMs = 0;
+        state.sceneLoadToken += 1;
+        stageIframe.onload = null;
+        stageIframe.onerror = null;
+        stageIframe.removeAttribute("src");
+      }
+
       function mountScene(scene, localMs) {
         if (!scene) {
+          unmountScene();
           return;
         }
         const sceneIndex = Number(scene.scene_index);
+        const value = Math.max(0, Number(localMs) || 0);
+        state.pendingLocalMs = value;
         if (state.activeSceneIndex === sceneIndex && stageIframe.getAttribute("src")) {
-          applyFrame(localMs);
+          if (state.loadedSceneIndex === sceneIndex) {
+            applyFrame(value);
+          }
           return;
         }
         state.activeSceneIndex = sceneIndex;
+        state.loadedSceneIndex = -1;
         state.sceneLoadToken += 1;
         const token = state.sceneLoadToken;
         stagePlaceholder.hidden = true;
@@ -786,7 +829,16 @@
           if (token !== state.sceneLoadToken) {
             return;
           }
-          applyFrame(state.pendingLocalMs);
+          state.loadedSceneIndex = sceneIndex;
+          applyFrame(state.pendingLocalMs, 0, token);
+        };
+        stageIframe.onerror = function () {
+          if (token !== state.sceneLoadToken) {
+            return;
+          }
+          state.loadedSceneIndex = -1;
+          stagePlaceholder.hidden = false;
+          setStatus("No se pudo cargar la escena " + String(sceneIndex) + ".", "error");
         };
         stageIframe.src = scene.html_url || scene.scene_url;
       }
@@ -849,13 +901,8 @@
         timeLabel.textContent = formatTime(target) + " / " + formatTime(duration);
 
         const scene = sceneAt(target);
-        if (scene) {
-          const localMs = Math.max(0, target - Number(scene.start_ms));
-          state.pendingLocalMs = localMs;
-          mountScene(scene, localMs);
-        } else {
-          applyFrame(target);
-        }
+        const localMs = scene ? Math.max(0, target - Number(scene.start_ms)) : 0;
+        mountScene(scene, localMs);
         updateActiveWord(target);
         updateSceneSelection(scene);
 
@@ -973,6 +1020,9 @@
         state.projectId = projectId;
         state.durationMs = manifestDuration(manifest);
         state.activeSceneIndex = -1;
+        state.loadedSceneIndex = -1;
+        state.pendingLocalMs = 0;
+        state.lastFrameTimeMs = 0;
         state.sceneLoadToken += 1;
 
         masterAudio.pause();

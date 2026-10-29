@@ -85,8 +85,12 @@ def create_project(
     height: int = 1920,
     fps: int = 60,
     description: str = "",
+    topic: str = "",
 ) -> dict[str, Any]:
-    """Create a video project workspace (vertical 9:16 by default, 60 FPS)."""
+    """Create a video project workspace (vertical 9:16 by default, 60 FPS).
+
+    ``topic`` is an alias for ``description`` so agents can use either name.
+    """
 
     try:
         return get_orchestrator().create_project(
@@ -95,7 +99,7 @@ def create_project(
             width=width,
             height=height,
             fps=fps,
-            description=description,
+            description=description or topic,
         )
     except Exception as error:
         return _error_payload(error)
@@ -146,13 +150,24 @@ def save_and_validate_scene(
 def render_project_video(
     project_id: str,
     burn_subtitles: bool = True,
+    fps: int | None = None,
 ) -> dict[str, Any]:
-    """Render validated scenes frame-by-frame at the project FPS into final.mp4."""
+    """Render validated scenes frame-by-frame at the project FPS into final.mp4.
+
+    ``fps`` optionally overrides and persists the project frame rate before render.
+    """
 
     try:
-        return get_orchestrator().render_project(
+        orchestrator = get_orchestrator()
+        if fps is None:
+            return orchestrator.render_project(
+                project_id,
+                burn_subtitles=burn_subtitles,
+            )
+        return orchestrator.render_project(
             project_id,
             burn_subtitles=burn_subtitles,
+            fps=fps,
         )
     except Exception as error:
         return _error_payload(error)

@@ -167,11 +167,11 @@ def build_ass_document(
     if not highlight_color.startswith("&H") or not highlight_color.endswith("&"):
         raise ValueError("highlight_color debe usar el formato ASS '&HBBGGRR&'")
 
-    font_size = max(28, round(min(width, height) * 0.07))
-    outline = max(2, round(font_size * 0.06))
+    font_size = max(34, round(min(width, height) * 0.05))
+    outline = max(2, round(font_size * 0.07))
     shadow = max(1, round(outline / 2))
     margin_lr = max(24, round(width * 0.05))
-    margin_v = max(24, round(height * 0.16))
+    margin_v = max(48, round(height * 0.18))
 
     header = [
         "[Script Info]",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -321,12 +322,55 @@ class TestMigrations:
             versions = [
                 row["version"] for row in conn.execute("SELECT version FROM _schema_migrations")
             ]
-        assert versions == ["0001_initial_schema.sql"]
+        assert versions == [
+            "0001_initial_schema.sql",
+            "0002_add_edge_tts_engine.sql",
+        ]
 
     def test_fresh_manager_records_version(self, tmp_path: Path) -> None:
         manager = DatabaseManager(tmp_path / "fresh.sqlite")
-        assert manager.initialize() == ["0001_initial_schema.sql"]
+        assert manager.initialize() == [
+            "0001_initial_schema.sql",
+            "0002_add_edge_tts_engine.sql",
+        ]
         assert manager.apply_migrations() == []
+
+    def test_edge_tts_migration_preserves_existing_voices(self, tmp_path: Path) -> None:
+        source_dir = (
+            Path(__file__).resolve().parents[2] / "src" / "mcp_videos" / "db" / "migrations"
+        )
+        migrations_dir = tmp_path / "migrations"
+        migrations_dir.mkdir()
+        shutil.copy(source_dir / "0001_initial_schema.sql", migrations_dir)
+        manager = DatabaseManager(tmp_path / "legacy.sqlite", migrations_dir=migrations_dir)
+        assert manager.initialize() == ["0001_initial_schema.sql"]
+        with manager.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO voices (id, name, engine, mode, language)
+                VALUES ('voz-legacy', 'Legacy', 'kokoro', 'preset', 'es')
+                """
+            )
+
+        shutil.copy(source_dir / "0002_add_edge_tts_engine.sql", migrations_dir)
+        assert manager.apply_migrations() == ["0002_add_edge_tts_engine.sql"]
+
+        with manager.connection() as conn:
+            legacy = conn.execute(
+                "SELECT name, engine FROM voices WHERE id = 'voz-legacy'"
+            ).fetchone()
+            assert legacy is not None
+            assert tuple(legacy) == ("Legacy", "kokoro")
+            conn.execute(
+                """
+                INSERT INTO voices (id, name, engine, mode, language)
+                VALUES ('voz-edge', 'Edge', 'edge_tts', 'preset', 'es')
+                """
+            )
+            assert (
+                conn.execute("SELECT COUNT(*) FROM voices WHERE engine = 'edge_tts'").fetchone()[0]
+                == 1
+            )
 
     def test_missing_migrations_dir_is_reported(self, tmp_path: Path) -> None:
         manager = DatabaseManager(tmp_path / "db.sqlite", migrations_dir=tmp_path / "missing")
