@@ -193,55 +193,150 @@
     activeWordIndexAt: activeWordIndexAt,
   };
 
+  var _sceneRenderCallback = null;
+
+  function registerSceneRender(fn) {
+    if (typeof fn === "function") {
+      _sceneRenderCallback = fn;
+      global.__sceneRender = fn;
+      if (typeof window !== "undefined") {
+        window.__sceneRender = fn;
+      }
+    }
+    return fn;
+  }
+
+  var _inSetFrameTime = false;
+  var _inBridgeSeek = false;
+
+  function createBridgeTimeline() {
+    return {
+      _isMcpBridge: true,
+      _timeSec: 0,
+      seek: function (sec) {
+        this._timeSec = Math.max(0, Number(sec) || 0);
+        if (!_inSetFrameTime && typeof setFrameTime === "function") {
+          _inBridgeSeek = true;
+          try {
+            setFrameTime(this._timeSec * 1000);
+          } finally {
+            _inBridgeSeek = false;
+          }
+        }
+        return this;
+      },
+      time: function (sec) {
+        if (sec === undefined) {
+          return this._timeSec;
+        }
+        return this.seek(sec);
+      },
+      duration: function () {
+        return (Number(global.__sceneDurationMs) || 10000) / 1000;
+      },
+      pause: function () {
+        return this;
+      },
+      play: function () {
+        return this;
+      },
+    };
+  }
+
+  global.__timelines = global.__timelines || {};
+  if (!global.__timelines["main"]) {
+    global.__timelines["main"] = createBridgeTimeline();
+  }
+
   function setFrameTime(timeMs) {
     var numeric = Number(timeMs);
     if (!isFinite(numeric)) {
       numeric = 0;
     }
     numeric = Math.max(0, numeric);
-    virtualNow = numeric;
-    global.__currentTimeMs = numeric;
 
-    var documentObject = global.document;
-    if (documentObject && documentObject.documentElement) {
-      var root = documentObject.documentElement;
-      root.style.setProperty("--time-ms", String(numeric));
-      root.setAttribute("data-frame-time-ms", String(numeric));
-      if (documentObject.body) {
-        documentObject.body.style.setProperty("--time-ms", String(numeric));
+    if (_inSetFrameTime) {
+      return numeric;
+    }
+
+    _inSetFrameTime = true;
+    try {
+      virtualNow = numeric;
+      global.__currentTimeMs = numeric;
+      if (typeof window !== "undefined") {
+        window.__currentTimeMs = numeric;
       }
+
+      var timeSec = numeric / 1000;
+      if (global.__timelines && global.__timelines["main"]) {
+        var mainTimeline = global.__timelines["main"];
+        if (mainTimeline._isMcpBridge) {
+          mainTimeline._timeSec = timeSec;
+        } else if (!_inBridgeSeek) {
+          if (typeof mainTimeline.seek === "function") {
+            mainTimeline.seek(timeSec);
+          } else if (typeof mainTimeline.time === "function") {
+            mainTimeline.time(timeSec);
+          }
+        }
+      }
+
+      var documentObject = global.document;
+      if (documentObject && documentObject.documentElement) {
+        var root = documentObject.documentElement;
+        root.style.setProperty("--time-ms", String(numeric));
+        root.setAttribute("data-frame-time-ms", String(numeric));
+        if (documentObject.body) {
+          documentObject.body.style.setProperty("--time-ms", String(numeric));
+        }
+      }
+
+      syncAnimations(numeric);
+
+      if (typeof global.onFrameTime === "function") {
+        global.onFrameTime(numeric, MotionKit);
+      }
+
+      if (typeof _sceneRenderCallback === "function") {
+        _sceneRenderCallback(numeric, MotionKit);
+      } else if (typeof global.__sceneRender === "function") {
+        global.__sceneRender(numeric, MotionKit);
+      }
+
+      if (documentObject && typeof global.CustomEvent === "function") {
+        documentObject.dispatchEvent(
+          new global.CustomEvent("frametime", { detail: { timeMs: numeric } }),
+        );
+      }
+
+      return numeric;
+    } finally {
+      _inSetFrameTime = false;
     }
-
-    syncAnimations(numeric);
-
-    if (typeof global.onFrameTime === "function") {
-      global.onFrameTime(numeric, MotionKit);
-    }
-
-    if (documentObject && typeof global.CustomEvent === "function") {
-      documentObject.dispatchEvent(
-        new global.CustomEvent("frametime", { detail: { timeMs: numeric } }),
-      );
-    }
-
-    return numeric;
   }
 
   global.__currentTimeMs = 0;
   global.MotionKit = MotionKit;
   global.__setFrameTime = setFrameTime;
+  global.__registerSceneRender = registerSceneRender;
+  global.__sceneRender = global.__sceneRender || null;
   global.__mcpVideosSyncAnimations = syncAnimations;
   global.__MCP_VIDEOS_HARNESS__ = {
-    version: "1.0.0",
+    version: "1.1.0",
     setFrameTime: setFrameTime,
+    registerSceneRender: registerSceneRender,
     syncAnimations: syncAnimations,
     MotionKit: MotionKit,
+    timelines: global.__timelines,
   };
 
   if (typeof window !== "undefined") {
     window.__currentTimeMs = 0;
     window.MotionKit = MotionKit;
     window.__setFrameTime = setFrameTime;
+    window.__registerSceneRender = registerSceneRender;
+    window.__timelines = global.__timelines;
+    window.__sceneRender = global.__sceneRender;
   }
 
   if (global.document && global.document.documentElement) {

@@ -27,8 +27,21 @@ PLAYWRIGHT_CACHE_DIR = Path.home() / ".cache" / "ms-playwright"
 PLAYWRIGHT_CHROMIUM_PATTERNS = (
     "chromium-*/chrome-linux/chrome",
     "chromium-*/chrome-linux64/chrome",
+    "chromium-*/chrome-win64/chrome.exe",
     "chromium_headless_shell-*/chrome-linux/headless_shell",
     "chromium_headless_shell-*/chrome-linux64/headless_shell",
+    "chromium_headless_shell-*/chrome-win64/chrome-headless-shell.exe",
+    "chromium_headless_shell-*/chrome-headless-shell-win64/chrome-headless-shell.exe",
+    "chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+)
+
+WINDOWS_CHROME_SYSTEM_PATHS = (
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+)
+
+MAC_CHROME_SYSTEM_PATHS = (
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 )
 
 app = typer.Typer(
@@ -51,6 +64,7 @@ class SystemCheckResult:
     ffmpeg_path: str | None
     ffprobe_path: str | None
     chromium_path: str | None
+    hyperframes_path: str | None = None
 
     @property
     def is_healthy(self) -> bool:
@@ -58,33 +72,115 @@ class SystemCheckResult:
         return bool(self.ffmpeg_path and self.ffprobe_path and self.chromium_path)
 
 
+def _detect_playwright_chromium() -> str | None:
+    """Localiza Chromium o Chrome en PATH, variables de entorno, sistema o cache de Playwright."""
+    env_custom = os.environ.get("MCP_VIDEOS_CHROMIUM_PATH")
+    if env_custom and Path(env_custom).is_file():
+        return str(Path(env_custom))
+
+    for binary in CHROMIUM_BINARIES:
+        path = shutil.which(binary)
+        if path:
+            return path
+
+    for system_path in (*WINDOWS_CHROME_SYSTEM_PATHS, *MAC_CHROME_SYSTEM_PATHS):
+        cand = Path(system_path)
+        if cand.is_file():
+            return str(cand)
+
+    return _find_playwright_chromium()
+
+
+def _detect_hyperframes_cli() -> str | None:
+    """Localiza el ejecutable de HyperFrames (@hyperframes/cli) o npx para invocarlo."""
+    env_dir = os.environ.get("MCP_VIDEOS_HYPERFRAMES_DIR")
+    if env_dir:
+        base = Path(env_dir)
+        if base.is_file():
+            return str(base)
+        if base.is_dir():
+            candidates = (
+                base / "node_modules" / ".bin" / "hyperframes.cmd",
+                base / "node_modules" / ".bin" / "hyperframes",
+                base / "hyperframes.cmd",
+                base / "hyperframes",
+                base / "bin" / "hyperframes.js",
+            )
+            for candidate in candidates:
+                if candidate.is_file():
+                    return str(candidate)
+
+    located = shutil.which("hyperframes")
+    if located:
+        return located
+
+    for local_cand in (
+        Path.cwd() / "node_modules" / ".bin" / "hyperframes.cmd",
+        Path.cwd() / "node_modules" / ".bin" / "hyperframes",
+    ):
+        if local_cand.is_file():
+            return str(local_cand)
+
+    npx_bin = shutil.which("npx")
+    if npx_bin:
+        return npx_bin
+
+    return None
+
+
 def _find_playwright_chromium(cache_dir: Path | None = None) -> str | None:
     """Busca un Chromium descargado por Playwright en su cache local."""
-    base = cache_dir or PLAYWRIGHT_CACHE_DIR
-    if not base.is_dir():
+    if cache_dir is not None:
+        if not cache_dir.is_dir():
+            return None
+        for pattern in PLAYWRIGHT_CHROMIUM_PATTERNS:
+            for candidate in sorted(cache_dir.glob(pattern), reverse=True):
+                if candidate.is_file():
+                    if platform.system() != "Windows" and not os.access(candidate, os.X_OK):
+                        continue
+                    return str(candidate)
         return None
-    for pattern in PLAYWRIGHT_CHROMIUM_PATTERNS:
-        for candidate in sorted(base.glob(pattern), reverse=True):
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                return str(candidate)
+
+    roots: list[Path] = []
+    env_playwright_browsers = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if env_playwright_browsers:
+        roots.append(Path(env_playwright_browsers))
+
+    roots.extend(
+        [
+            Path.home() / ".cache" / "ms-playwright",
+            Path.home() / "Library" / "Caches" / "ms-playwright",
+        ]
+    )
+
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        roots.append(Path(local_app_data) / "ms-playwright")
+
+    for root in roots:
+        if root.is_dir():
+            for pat in PLAYWRIGHT_CHROMIUM_PATTERNS:
+                matches = sorted(root.glob(pat), reverse=True)
+                for candidate in matches:
+                    if candidate.is_file():
+                        if platform.system() != "Windows" and not os.access(candidate, os.X_OK):
+                            continue
+                        return str(candidate)
     return None
 
 
 def find_chromium() -> str | None:
     """Localiza Chromium en PATH o en la cache de navegadores de Playwright."""
-    for binary in CHROMIUM_BINARIES:
-        path = shutil.which(binary)
-        if path:
-            return path
-    return _find_playwright_chromium()
+    return _detect_playwright_chromium()
 
 
 def check_system_dependencies() -> SystemCheckResult:
-    """Comprueba la disponibilidad de `ffmpeg`, `ffprobe` y Chromium."""
+    """Comprueba la disponibilidad de `ffmpeg`, `ffprobe`, Chromium y HyperFrames."""
     return SystemCheckResult(
         ffmpeg_path=shutil.which("ffmpeg"),
         ffprobe_path=shutil.which("ffprobe"),
-        chromium_path=find_chromium(),
+        chromium_path=_detect_playwright_chromium(),
+        hyperframes_path=_detect_hyperframes_cli(),
     )
 
 
@@ -141,8 +237,9 @@ def _load_script_turns(script_file: Path) -> list[dict[str, Any]]:
 def doctor(
     as_json: bool = typer.Option(False, "--json", help="Emite el diagnostico en formato JSON."),
 ) -> None:
-    """Diagnostica ffmpeg, ffprobe, Chromium y la configuracion activa."""
+    """Diagnostica ffmpeg, ffprobe, Chromium, HyperFrames y la configuracion activa."""
     result = check_system_dependencies()
+    hyperframes_path = _detect_hyperframes_cli()
     settings = AppSettings()
     status = "ok" if result.is_healthy else "error"
     payload = {
@@ -153,6 +250,13 @@ def doctor(
         "ffmpeg": result.ffmpeg_path,
         "ffprobe": result.ffprobe_path,
         "chromium": result.chromium_path,
+        "hyperframes": hyperframes_path,
+        "binaries": {
+            "ffmpeg": result.ffmpeg_path,
+            "ffprobe": result.ffprobe_path,
+            "chromium": result.chromium_path,
+            "hyperframes": hyperframes_path,
+        },
         "settings": {
             "db_path": str(settings.mcp_videos_db_path),
             "workspaces_dir": str(settings.mcp_videos_workspaces_dir),
@@ -160,6 +264,7 @@ def doctor(
             "device": settings.resolved_device,
             "preview_port": settings.preview_port,
             "default_video_fps": settings.default_video_fps,
+            "default_render_backend": settings.default_render_backend,
         },
     }
 
@@ -168,9 +273,19 @@ def doctor(
     else:
         typer.echo(f"mcp-videos {__version__} — doctor")
         typer.echo(f"Python: {payload['python']}")
-        for label, key in (("ffmpeg", "ffmpeg"), ("ffprobe", "ffprobe"), ("chromium", "chromium")):
+        for label, key in (
+            ("ffmpeg", "ffmpeg"),
+            ("ffprobe", "ffprobe"),
+            ("chromium", "chromium"),
+            ("hyperframes", "hyperframes"),
+        ):
             value = payload[key]
-            state = "OK" if value else "MISSING"
+            if value:
+                state = "OK"
+            elif key == "hyperframes":
+                state = "NOT FOUND (opcional)"
+            else:
+                state = "MISSING"
             typer.echo(f"{label}: {state} ({value or 'no encontrado'})")
         typer.echo(f"device: {settings.resolved_device}")
         typer.echo(f"preview_port: {settings.preview_port}")
@@ -369,6 +484,12 @@ def render(
         "--burn-subtitles/--no-burn-subtitles",
         help="Quema los subtitulos ASS en el MP4.",
     ),
+    backend: str = typer.Option(
+        "auto",
+        "--backend",
+        "-b",
+        help="Motor de render: auto, hyperframes o playwright.",
+    ),
     as_json: bool = typer.Option(False, "--json", help="Emite la respuesta en formato JSON."),
 ) -> None:
     """Renderiza el video determinista a FPS constantes y subtitulos dinamicos."""
@@ -376,6 +497,7 @@ def render(
         payload = get_orchestrator().render_project(
             project_id,
             burn_subtitles=burn_subtitles,
+            backend=backend,  # type: ignore[arg-type]
         )
     except Exception as error:
         _abort(error)
@@ -387,7 +509,49 @@ def render(
             f"Render {payload['status']}: {payload['rendered_frames']}/"
             f"{payload['total_frames']} frames.",
             f"video: {payload['output_mp4_path']}",
+            f"backend: {payload.get('backend_used', 'n/a')}",
             f"subtitulos: {payload['subtitles_path'] or 'desactivados'}",
+        ],
+    )
+
+
+@app.command("check")
+def check(
+    project_id: str | None = typer.Argument(None, help="Slug del proyecto a auditar."),
+    project_id_opt: str | None = typer.Option(
+        None,
+        "--project-id",
+        help="Slug del proyecto a auditar (alias opcional).",
+    ),
+    backend: str = typer.Option(
+        "auto",
+        "--backend",
+        "-b",
+        help="Motor de auditoría: auto, hyperframes o playwright.",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emite la respuesta en formato JSON."),
+) -> None:
+    """Audita visualmente las escenas y la composición de un proyecto."""
+    target_project_id = project_id or project_id_opt
+    if not target_project_id:
+        _abort(ValueError("Debe especificar el slug del proyecto."))
+        return
+    try:
+        payload = get_orchestrator().audit_project_visuals(
+            target_project_id,
+            backend=backend,  # type: ignore[arg-type]
+        )
+    except Exception as error:
+        _abort(error)
+        return
+    state = "OK" if payload.get("ok") else "CON ERRORES"
+    _emit(
+        payload,
+        as_json,
+        [
+            f"Auditoría visual de {target_project_id}: {state}",
+            f"backend: {payload.get('backend_used')}",
+            f"composición: {payload.get('composition_html_path')}",
         ],
     )
 

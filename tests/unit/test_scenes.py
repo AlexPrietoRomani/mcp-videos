@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import sync_playwright
 
 from mcp_videos.config import AppSettings
 from mcp_videos.core.models import WordTimestamp
@@ -31,8 +34,11 @@ from mcp_videos.scenes.templates import (
 )
 from mcp_videos.scenes.validator import (
     HARNESS_MARKER,
+    SceneValidator,
     ValidationResult,
+    find_chromium_executable,
     inject_harness,
+    is_hyperframes_composition,
     load_harness_script,
     needs_harness,
     prepare_scene_html,
@@ -61,6 +67,9 @@ class TestHarnessInjection:
         assert "__currentTimeMs" in script
         assert "--time-ms" in script
         assert "window.MotionKit" in script
+        assert "__timelines" in script
+        assert "_isMcpBridge" in script
+        assert "__registerSceneRender" in script
         for helper in (
             "clamp",
             "lerp",
@@ -114,6 +123,191 @@ class TestHarnessInjection:
         assert prepare_scene_html("<html><body>x</body></html>") == inject_harness(
             "<html><body>x</body></html>"
         )
+
+
+def _launch_chromium(playwright: Any) -> Any:
+    try:
+        return playwright.chromium.launch(headless=True)
+    except PlaywrightError:
+        executable = find_chromium_executable()
+        if executable is None:
+            pytest.skip("Chromium no disponible en el entorno")
+        return playwright.chromium.launch(headless=True, executable_path=executable)
+
+
+class TestDualTimelineBridge:
+    def test_is_hyperframes_composition(self) -> None:
+        hf_html = '<div id="root" data-composition-id="main"><h1>Composición</h1></div>'
+        standard_html = '<div id="scene">Escena Estándar</div>'
+        assert is_hyperframes_composition(hf_html) is True
+        assert is_hyperframes_composition(standard_html) is False
+
+    def test_harness_dual_timeline_bridge_seek_updates_frame_time(self, tmp_path: Path) -> None:
+        html = """<!DOCTYPE html>
+        <html>
+        <head></head>
+        <body>
+          <div id="stage">Test Dual Bridge</div>
+          <script>
+            window.__sceneRenderCalledWith = null;
+            window.__registerSceneRender(function (timeMs, motionKit) {
+              window.__sceneRenderCalledWith = timeMs;
+            });
+          </script>
+        </body>
+        </html>
+        """
+        prepared = inject_harness(html)
+        scene_file = tmp_path / "test_bridge.html"
+        scene_file.write_text(prepared, encoding="utf-8")
+
+        with sync_playwright() as playwright:
+            browser = _launch_chromium(playwright)
+            try:
+                page = browser.new_page()
+                page.goto(scene_file.as_uri())
+
+                bridge_info = page.evaluate(
+                    """
+                    () => ({
+                      hasTimelines: typeof window.__timelines === "object",
+                      isMcpBridge: Boolean(
+                        window.__timelines &&
+                        window.__timelines["main"] &&
+                        window.__timelines["main"]._isMcpBridge
+                      ),
+                      defaultTime: window.__timelines["main"].time(),
+                      duration: window.__timelines["main"].duration(),
+                    })
+                    """
+                )
+                assert bridge_info["hasTimelines"] is True
+                assert bridge_info["isMcpBridge"] is True
+                assert bridge_info["defaultTime"] == 0
+                assert bridge_info["duration"] == 10.0
+
+                result = page.evaluate(
+                    """
+                    () => {
+                      const tl = window.__timelines["main"];
+                      tl.seek(1.25);
+                      return {
+                        currentTimeMs: window.__currentTimeMs,
+                        sceneRenderCalledWith: window.__sceneRenderCalledWith,
+                        timelineTimeSec: tl.time(),
+                      };
+                    }
+                    """
+                )
+                assert result["currentTimeMs"] == 1250
+                assert result["sceneRenderCalledWith"] == 1250
+                assert result["timelineTimeSec"] == 1.25
+            finally:
+                browser.close()
+
+    def test_harness_forwards_set_frame_time_to_custom_gsap_timeline(self, tmp_path: Path) -> None:
+        html = """<!DOCTYPE html>
+        <html>
+        <head>
+          <script>
+            window.__customSeekSec = null;
+            window.__timelines = window.__timelines || {};
+            window.__timelines["main"] = {
+              seek: function (sec) {
+                window.__customSeekSec = sec;
+                return this;
+              },
+              time: function (sec) {
+                if (sec === undefined) return window.__customSeekSec || 0;
+                return this.seek(sec);
+              },
+              duration: function () { return 5.0; },
+              pause: function () { return this; },
+              play: function () { return this; },
+            };
+          </script>
+        </head>
+        <body>
+          <div id="stage">Timeline Personalizado</div>
+        </body>
+        </html>
+        """
+        validator = SceneValidator(width=1080, height=1920)
+        validation = validator.validate_html(html, duration_ms=5000)
+
+        assert validation.valid is True
+        assert validation.status.value == "valid"
+
+        prepared = inject_harness(html)
+        scene_file = tmp_path / "custom_timeline.html"
+        scene_file.write_text(prepared, encoding="utf-8")
+
+        with sync_playwright() as playwright:
+            browser = _launch_chromium(playwright)
+            try:
+                page = browser.new_page()
+                page.goto(scene_file.as_uri())
+
+                eval_result = page.evaluate(
+                    """
+                    () => {
+                      window.__setFrameTime(2500);
+                      return {
+                        currentTimeMs: window.__currentTimeMs,
+                        customSeekSec: window.__customSeekSec,
+                      };
+                    }
+                    """
+                )
+                assert eval_result["currentTimeMs"] == 2500
+                assert eval_result["customSeekSec"] == 2.5
+            finally:
+                browser.close()
+
+    def test_validator_accepts_hyperframes_composition(self) -> None:
+        html = """<!DOCTYPE html>
+        <html lang="es">
+        <head>
+          <meta charset="utf-8">
+          <style>body { margin: 0; background: #000; color: #fff; }</style>
+        </head>
+        <body>
+          <div id="root"
+               data-composition-id="main"
+               data-width="1080"
+               data-height="1920"
+               data-fps="60"
+               data-duration="4.5">
+            <h1 id="title">Composición HyperFrames</h1>
+          </div>
+          <script>
+            window.__timelines = window.__timelines || {};
+            window.__timelines["main"] = {
+              _t: 0,
+              seek: function(sec) {
+                this._t = Number(sec) || 0;
+                document.getElementById("title").textContent = "Time: " + this._t;
+                return this;
+              },
+              time: function(sec) {
+                if (sec === undefined) return this._t;
+                return this.seek(sec);
+              },
+              duration: function() { return 4.5; },
+              pause: function() { return this; },
+              play: function() { return this; },
+            };
+          </script>
+        </body>
+        </html>
+        """
+        assert is_hyperframes_composition(html) is True
+        validator = SceneValidator(width=1080, height=1920)
+        res = validator.validate_html(html, duration_ms=4500)
+
+        assert res.valid is True
+        assert res.status.value == "valid"
+        assert res.errors == []
 
 
 class TestValidationResult:

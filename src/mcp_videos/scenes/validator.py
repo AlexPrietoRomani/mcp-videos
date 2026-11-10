@@ -41,6 +41,7 @@ _HEAD_OPEN_RE = re.compile(r"<head\b[^>]*>", flags=re.IGNORECASE)
 _HTML_OPEN_RE = re.compile(r"<html\b[^>]*>", flags=re.IGNORECASE)
 _DOCTYPE_RE = re.compile(r"^\s*<!doctype\b[^>]*>", flags=re.IGNORECASE)
 _CLOCK_RE = re.compile(r"__setFrameTime\s*(?:=|:)", flags=re.IGNORECASE)
+_COMPOSITION_ID_RE = re.compile(r"data-composition-id\s*=", flags=re.IGNORECASE)
 _HARNESS_CACHE: str | None = None
 
 
@@ -103,6 +104,12 @@ def html_declares_clock(html: str) -> bool:
     """Whether the document already assigns its own ``__setFrameTime``."""
 
     return _CLOCK_RE.search(html) is not None
+
+
+def is_hyperframes_composition(html: str) -> bool:
+    """Indica si el documento HTML declara una composición HyperFrames."""
+
+    return _COMPOSITION_ID_RE.search(html) is not None
 
 
 def needs_harness(html: str) -> bool:
@@ -179,6 +186,26 @@ def find_chromium_executable() -> str | None:
         resolved = shutil.which(binary)
         if resolved:
             return resolved
+
+    # Búsqueda en rutas de instalación de Playwright en Windows y Linux
+    roots = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright",
+        Path.home() / ".cache" / "ms-playwright",
+    ]
+    patterns = (
+        "chromium-*/chrome-win64/chrome.exe",
+        "chromium_headless_shell-*/chrome-headless-shell-win64/chrome-headless-shell.exe",
+        "chromium-*/chrome-linux/chrome",
+        "chromium_headless_shell-*/chrome-linux/chrome",
+    )
+    for root in roots:
+        if root.is_dir():
+            for pat in patterns:
+                matches = sorted(root.glob(pat), reverse=True)
+                for match in matches:
+                    if match.is_file():
+                        return str(match)
+
     return None
 
 
@@ -406,15 +433,29 @@ class SceneValidator:
         result: ValidationResult,
     ) -> None:
         try:
-            has_clock = bool(
-                page.evaluate("typeof window.__setFrameTime === 'function'")
+            contracts = page.evaluate(
+                """
+                () => ({
+                    hasClock: typeof window.__setFrameTime === 'function',
+                    hasTimeline: Boolean(
+                        window.__timelines &&
+                        typeof window.__timelines["main"] === 'object' &&
+                        window.__timelines["main"] !== null
+                    ),
+                })
+                """
             )
         except PlaywrightError as exc:
             result.errors.append(f"clock: {_normalize_message(exc)}")
             return
 
-        if not has_clock:
-            result.errors.append("window.__setFrameTime no está definido")
+        has_clock = bool(contracts.get("hasClock"))
+        has_timeline = bool(contracts.get("hasTimeline"))
+
+        if not has_clock and not has_timeline:
+            result.errors.append(
+                "window.__setFrameTime ni window.__timelines['main'] están definidos"
+            )
             return
 
         try:
@@ -441,11 +482,19 @@ class SceneValidator:
                 page.evaluate(
                     """
                     (timeMs) => {
-                      const setter = window.__setFrameTime;
-                      if (typeof setter !== 'function') {
-                        throw new Error('window.__setFrameTime no es una función');
+                      if (typeof window.__setFrameTime === 'function') {
+                        return window.__setFrameTime(timeMs);
                       }
-                      return setter(timeMs);
+                      if (
+                        window.__timelines &&
+                        window.__timelines["main"] &&
+                        typeof window.__timelines["main"].seek === 'function'
+                      ) {
+                        return window.__timelines["main"].seek(timeMs / 1000.0);
+                      }
+                      throw new Error(
+                        'Ni window.__setFrameTime ni window.__timelines["main"].seek existen'
+                      );
                     }
                     """,
                     time_ms,
@@ -592,6 +641,7 @@ __all__ = [
     "html_declares_clock",
     "inject_harness",
     "inject_harness_into_html",
+    "is_hyperframes_composition",
     "load_harness_script",
     "needs_harness",
     "prepare_scene_html",
