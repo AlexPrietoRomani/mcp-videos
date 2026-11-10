@@ -331,30 +331,32 @@ sequenceDiagram
 
 ---
 
-## 8. Flujo 6 — Renderizado Determinista 60 FPS y Composición MP4
+## 8. Flujo 6 — Renderizado Determinista Híbrido (HyperFrames Multi-Worker + Fallback Playwright) y Composición MP4
 
-**Entrada → Proceso → Salida:** Escenas `.html` validadas y `dialogue_master.wav` → captura frame a frame a 60 FPS y pipe a FFmpeg → `final.mp4`.
+**Entrada → Proceso → Salida:** Escenas `.html` validadas y `dialogue_master.wav` → exportación a composición HyperFrames (`npx hyperframes check` + `npx hyperframes render` multi-worker GPU) o captura Playwright frame a frame → `final.mp4`.
 
-Script: `src/mcp_videos/render/engine.py`.
+Script: `src/mcp_videos/render/hyperframes_bridge.py` y `src/mcp_videos/render/engine.py`.
 
-### 8.1 Pipeline de captura determinista y codificación FFmpeg
+### 8.1 Pipeline de captura determinista híbrida y codificación MP4
 
 ```mermaid
 flowchart LR
-    SCENES(["Escenas .html validadas\n+ dialogue_master.wav"]):::fuente
-    LOOP["Bucle determinista f = 0 .. N-1\nCalcula t_ms = (f / fps) * 1000"]:::proc
-    PW["Playwright Headless:\n__setFrameTime(t_ms) + screenshot PNG/JPEG"]:::proc
-    PIPE["Subproceso FFmpeg (image2pipe)\nlibx264 + yuv420p + AAC 192k + ASS Subtitles"]:::proc
+    SCENES(["Escenas .html validadas\n+ dialogue_master.wav + cues.json"]):::fuente
+    BRIDGE["HyperFramesBridge:\nGenera index.html (data-composition-id + window.__timelines\n<-> __setFrameTime) + pista captions DOM"]:::proc
+    HF_DEC{"¿Backend HyperFrames\ndisponible (auto/hyperframes)?"}:::ui
+    HF_RENDER["npx hyperframes check + render\n(Multi-worker GPU + BeginFrame CDP + AudioMixer)"]:::proc
+    PW["Fallback Playwright Headless:\n__setFrameTime(t_ms) + FFmpeg image2pipe\n(con detección inteligente de libass)"]:::proc
     MP4[("workspaces/<slug>/output/final.mp4\n+ actualización en render_jobs")]:::out
 
-    SCENES --> LOOP --> PW
-    PW -->|"Bytes del frame f por stdin"| PIPE
-    PIPE -->|"Muxing final con audio"| MP4
+    SCENES --> BRIDGE --> HF_DEC
+    HF_DEC -->|"Sí"| HF_RENDER --> MP4
+    HF_DEC -->|"No / backend=playwright"| PW --> MP4
 
     classDef fuente fill:#EAB308,stroke:#A16207,color:#1F2937;
     classDef proc   fill:#3B82F6,stroke:#1D4ED8,color:#FFFFFF;
     classDef model  fill:#22C55E,stroke:#15803D,color:#06310F;
     classDef out    fill:#8B5CF6,stroke:#6D28D9,color:#FFFFFF;
+    classDef ui     fill:#64748B,stroke:#334155,color:#FFFFFF;
 ```
 
 ### 8.2 Reglas e invariantes
@@ -362,7 +364,8 @@ flowchart LR
 | Regla | Descripción |
 |---|---|
 | **Precondición de escenas validadas** | El motor de render rechaza iniciar cualquier trabajo (`render_jobs`) si alguna escena del proyecto tiene `validation_status != 'valid'` o si existen huecos temporales en `[0, total_duration_ms]`. |
-| **Determinismo de tasa de cuadros (0 dropped frames)** | El reloj nunca avanza según el tiempo de pared (`wall-clock`), sino por índice discreto de frame $f \in [0, N-1]$. FFmpeg espera en su `stdin` hasta que Playwright entregue el screenshot de cada instante $t_f$, asegurando `60.00 FPS` constantes incluso en equipos solo con CPU. |
+| **Puente Dual de Reloj (`window.__timelines` ↔ `window.__setFrameTime`)** | El arnés `harness.js` y `hyperframes_bridge.py` exponen simultáneamente `window.__setFrameTime(timeMs)` y un proxy compatible en `window.__timelines["main"]`, permitiendo que las escenas existentes de `mcp-videos` y las composiciones GSAP nativas de HyperFrames se auditen con `npx hyperframes check` y se rendericen en paralelo con `npx hyperframes render`. |
+| **Tolerancia Multiplataforma a `libass` y Diagnóstico de `stderr`** | En el motor Playwright/FFmpeg (`engine.py`), si `burn_subtitles=True` pero el binario de FFmpeg del sistema (ej. Conda en Windows) carece del filtro `ass` (`libass`), el motor omite el filtro `ass` emitiendo una advertencia controlada (dado que los subtítulos ya se renderizan en el DOM) y captura siempre `process.stderr` ante cualquier cierre prematuro del pipe. |
 | **Compatibilidad universal del contenedor MP4** | Todo video exportado se codifica con `-c:v libx264 -pix_fmt yuv420p -movflags +faststart -c:a aac -b:a 192k`, garantizando reproducción inmediata en YouTube Shorts, TikTok, Instagram Reels y navegadores web. |
 
 ---
@@ -504,6 +507,7 @@ flowchart LR
 | **ADR-03: Escenas en HTML5/CSS/SVG/GSAP autocontenidas en lugar de proyectos React/Remotion** | Generar componentes `.tsx` de Remotion y compilar con Webpack/Esbuild por escena | Los LLMs (especialmente modelos locales vía Ollama) generan un único archivo `.html` autocontenido ("estilo Claude Artifact") con una tasa de éxito muy superior y cero latencia de compilación respecto a un árbol de componentes React/TypeScript con múltiples imports. |
 | **ADR-04: Arquitectura de Adaptadores Multi-Backend para TTS (`Preset CPU` + `Clone Zero-Shot` + `API`)** | Usar únicamente un modelo pesado de clonación (`XTTS-v2` / `F5-TTS`) para todos los casos | En equipos sin GPU CUDA, los modelos zero-shot tardan varios segundos por frase; al incluir `Kokoro-ONNX`/`Piper` para voces predeterminadas, el usuario puede iterar diálogos completos en menos de 2 segundos en CPU y activar el motor de clonación solo para las voces clonadas específicas. |
 | **ADR-05: Estado relacional en SQLite + binarios multimedia en `workspaces/<slug>/`** | Guardar todo en archivos JSON sueltos o meter los `.wav`/`.mp4` como `BLOB` en SQLite | SQLite aporta integridad referencial (`FOREIGN KEY`), consultas rápidas de palabras por rango de tiempo (`WHERE start_ms BETWEEN ...`) e invalidación automática de escenas cuando cambia una línea de diálogo, mientras que dejar los `.wav` y `.mp4` en disco permite que FFmpeg y el servidor HTTP hagan streaming directo sin copias en memoria. |
+| **ADR-06: Arquitectura Híbrida (`mcp-videos` para Audio-First Multi-Voz + `hyperframes` para Auditoría Visual y Render Multi-Worker)** | Mantener únicamente el capturador Playwright monohilo propio o migrar 100% al CLI de TTS de HyperFrames | `mcp-videos` supera a HyperFrames en síntesis de diálogo multi-turno gratuito/local (`edge-tts`, clonación zero-shot `XTTS-v2`/`F5-TTS`, normalización `-16 LUFS` por turno y reconciliación determinista `faster-whisper` + `SequenceMatcher`), mientras que HyperFrames supera por ~4.5x en velocidad de renderizado (pool paralelo de workers Chromium con GPU y `BeginFrame` CDP) y en auditoría visual (`80+ checks` de layout, overlap y contraste WCAG). Combinar ambos ofrece lo mejor de cada ecosistema manteniendo el fallback a Playwright cuando Node/HyperFrames no esté disponible. |
 
 ---
 
