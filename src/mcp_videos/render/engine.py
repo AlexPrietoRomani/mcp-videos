@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+import functools
+import logging
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Callable, Sequence
@@ -75,11 +78,34 @@ class RenderResult:
     rendered_frames: int
 
 
+logger = logging.getLogger(__name__)
+
+
 def _escape_filter_path(path: Path) -> str:
     value = str(path).replace("\\", "\\\\")
     for character in (":", "'", ",", "[", "]"):
         value = value.replace(character, f"\\{character}")
     return value
+
+
+@functools.lru_cache(maxsize=8)
+def _ffmpeg_supports_ass_filter(ffmpeg_bin: str) -> bool:
+    """Comprueba si el binario de FFmpeg soporta el filtro 'ass' (libass).
+
+    Ejecuta `ffmpeg -hide_banner -filters` y verifica si el filtro ass está presente.
+    Si el binario no existe o la ejecución falla, devuelve False sin lanzar excepciones.
+    """
+    try:
+        proc = subprocess.run(
+            [ffmpeg_bin, "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        return bool(re.search(r"\bass\b", proc.stdout))
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 class DeterministicRenderEngine:
@@ -102,6 +128,7 @@ class DeterministicRenderEngine:
         self.db = db
         self.workspace = workspace
         self.settings = settings or AppSettings()
+        self._settings = self.settings
         self.ffmpeg_binary = ffmpeg_binary or os.environ.get("FFMPEG_BINARY", "ffmpeg")
         self.chromium_executable_path = (
             str(chromium_executable_path) if chromium_executable_path is not None else None
@@ -266,6 +293,14 @@ class DeterministicRenderEngine:
         total_frames = total_frames_for_duration(resolved.total_duration_ms, resolved.fps)
         master_path = self._resolve_master_audio(resolved, master_audio_path)
         should_burn_subtitles = True if burn_subtitles is None else bool(burn_subtitles)
+        if should_burn_subtitles and not _ffmpeg_supports_ass_filter(self.ffmpeg_binary):
+            logger.warning(
+                "El binario FFmpeg %r no incluye soporte libass (filtro 'ass'). "
+                "Se omitirá el quemado de subtítulos ASS en el contenedor de video "
+                "(los subtítulos ya se renderizan en el DOM de la escena).",
+                self.ffmpeg_binary,
+            )
+            should_burn_subtitles = False
 
         job = RenderJob(
             project_id=resolved.id,
@@ -329,13 +364,50 @@ class DeterministicRenderEngine:
                 total_frames=total_frames,
                 rendered_frames=total_frames,
             )
-        except Exception as exc:
+        except (BrokenPipeError, OSError) as exc:
+            stderr_detail = ""
             if process is not None:
+                with contextlib.suppress(Exception):
+                    if process.stdin and not process.stdin.closed:
+                        process.stdin.close()
+                with contextlib.suppress(subprocess.TimeoutExpired, Exception):
+                    process.wait(timeout=5.0)
+                stderr_detail = self._read_process_stderr(process).strip()
                 self._abort_process(process)
             with contextlib.suppress(FileNotFoundError):
                 temporary_output.unlink()
+            error_message = (
+                f"FFmpeg cerró su stdin prematuramente: {stderr_detail[-1200:]}"
+                if stderr_detail
+                else "FFmpeg cerró su stdin antes de terminar la captura"
+            )
             with contextlib.suppress(Exception):
-                self.jobs.fail(job.id, str(exc))
+                self.jobs.fail(job.id, error_message)
+            with contextlib.suppress(Exception):
+                self.projects.update_status(resolved.id, ProjectStatus.FAILED)
+            raise RenderEngineError(error_message) from exc
+        except Exception as exc:
+            stderr_detail = ""
+            if process is not None:
+                with contextlib.suppress(Exception):
+                    if process.stdin and not process.stdin.closed:
+                        process.stdin.close()
+                with contextlib.suppress(subprocess.TimeoutExpired, Exception):
+                    process.wait(timeout=5.0)
+                stderr_detail = self._read_process_stderr(process).strip()
+                self._abort_process(process)
+            with contextlib.suppress(FileNotFoundError):
+                temporary_output.unlink()
+            error_message = str(exc)
+            if stderr_detail and (
+                "BrokenPipe" in type(exc).__name__
+                or "BrokenPipe" in error_message
+                or "stdin" in error_message
+            ):
+                error_message = f"FFmpeg cerró su stdin prematuramente: {stderr_detail[-1200:]}"
+                exc = RenderEngineError(error_message)
+            with contextlib.suppress(Exception):
+                self.jobs.fail(job.id, error_message)
             with contextlib.suppress(Exception):
                 self.projects.update_status(resolved.id, ProjectStatus.FAILED)
             if isinstance(exc, (RenderEngineError, ValueError)):
@@ -564,7 +636,7 @@ class DeterministicRenderEngine:
                         stdin.write(image)
                         stdin.flush()
                     except (BrokenPipeError, OSError) as exc:
-                        raise RenderEngineError(
+                        raise BrokenPipeError(
                             "FFmpeg cerró su stdin antes de terminar la captura"
                         ) from exc
 
@@ -573,12 +645,21 @@ class DeterministicRenderEngine:
                 browser.close()
 
 
+# Alias para conveniencia y compatibilidad de nombres
+RenderEngine = DeterministicRenderEngine
+DeterministicRenderEngine._build_ffmpeg_command = (  # type: ignore[attr-defined]
+    DeterministicRenderEngine.build_ffmpeg_command
+)
+
+
 __all__ = [
     "DEFAULT_AUDIO_BITRATE",
     "DEFAULT_FALLBACK_CHROMIUM_PATH",
     "SUBTITLES_FILENAME",
     "DeterministicRenderEngine",
+    "RenderEngine",
     "RenderEngineError",
     "RenderResult",
     "SceneNotValidatedError",
+    "_ffmpeg_supports_ass_filter",
 ]

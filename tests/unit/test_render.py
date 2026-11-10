@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import io
+import json
+import os
 import shutil
 import subprocess
 import wave
@@ -9,7 +12,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from mcp_videos.cli import _detect_hyperframes_cli, _detect_playwright_chromium, app
 from mcp_videos.config import AppSettings
 from mcp_videos.core.models import (
     Project,
@@ -25,6 +30,8 @@ from mcp_videos.render.engine import (
     DeterministicRenderEngine,
     RenderEngineError,
     SceneNotValidatedError,
+    _escape_filter_path,
+    _ffmpeg_supports_ass_filter,
 )
 from mcp_videos.render.subtitles import (
     ASS_HIGHLIGHT_COLOR,
@@ -209,13 +216,17 @@ class TestAssSubtitles:
         assert "[Events]" in content
         assert "Dialogue:" not in content
 
-    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg no está disponible")
+    @pytest.mark.skipif(
+        shutil.which("ffmpeg") is None or not _ffmpeg_supports_ass_filter("ffmpeg"),
+        reason="ffmpeg con soporte libass (filtro ass) no está disponible",
+    )
     def test_ffmpeg_accepts_generated_ass(self, tmp_path: Path) -> None:
         words = [
             make_word(0, "SUBTITULO", 0, 400),
             make_word(1, "DINAMICO", 400, 800),
         ]
         target = generate_ass_subtitles(words, 360, 640, tmp_path / "subtitles.ass")
+        null_out = "NUL" if os.name == "nt" else "-"
 
         completed = subprocess.run(
             [
@@ -229,10 +240,10 @@ class TestAssSubtitles:
                 "-i",
                 "color=c=black:s=360x640:r=60:d=1",
                 "-vf",
-                f"ass={target}",
+                f"ass={_escape_filter_path(target)}",
                 "-f",
                 "null",
-                "-",
+                null_out,
             ],
             check=False,
             capture_output=True,
@@ -375,6 +386,26 @@ class TestRenderFailures:
         for scene in scenes:
             SceneRepository(db).upsert(scene)
 
+        class DummyProcess:
+            def __init__(self) -> None:
+                self.stdin = io.BytesIO()
+                self.stderr = io.BytesIO(b"")
+                self.returncode = 0
+
+            def poll(self) -> int:
+                return 0
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 0
+
+            def terminate(self) -> None:
+                pass
+
+            def kill(self) -> None:
+                pass
+
+        monkeypatch.setattr(engine, "_start_ffmpeg", lambda cmd: DummyProcess())
+
         def raise_capture(*args: object, **kwargs: object) -> None:
             raise RenderEngineError("fallo simulado de captura")
 
@@ -389,3 +420,343 @@ class TestRenderFailures:
         assert jobs[0].error_message == "fallo simulado de captura"
         assert ProjectRepository(db).get_or_raise(project.id).status.value == "failed"
         assert not workspace.final_mp4_path(project.id).exists()
+
+
+class TestDetectPlaywrightChromium:
+    def test_detect_via_custom_env_var(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        custom_chrome = tmp_path / "custom_chrome.exe"
+        custom_chrome.touch()
+        monkeypatch.setenv("MCP_VIDEOS_CHROMIUM_PATH", str(custom_chrome))
+
+        detected = _detect_playwright_chromium()
+        assert detected == str(custom_chrome)
+
+    def test_detect_windows_ms_playwright_tree(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("MCP_VIDEOS_CHROMIUM_PATH", raising=False)
+        monkeypatch.setattr(shutil, "which", lambda cmd: None)
+        monkeypatch.setattr("mcp_videos.cli.WINDOWS_CHROME_SYSTEM_PATHS", ())
+        monkeypatch.setattr("mcp_videos.cli.MAC_CHROME_SYSTEM_PATHS", ())
+
+        fake_local_app_data = tmp_path / "AppData" / "Local"
+        chrome_exe = (
+            fake_local_app_data
+            / "ms-playwright"
+            / "chromium-1155"
+            / "chrome-win64"
+            / "chrome.exe"
+        )
+        chrome_exe.parent.mkdir(parents=True, exist_ok=True)
+        chrome_exe.touch()
+
+        monkeypatch.setenv("LOCALAPPDATA", str(fake_local_app_data))
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "")
+
+        detected = _detect_playwright_chromium()
+        assert detected == str(chrome_exe)
+
+    def test_detect_linux_ms_playwright_tree(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("MCP_VIDEOS_CHROMIUM_PATH", raising=False)
+        monkeypatch.setattr(shutil, "which", lambda cmd: None)
+        monkeypatch.setattr("mcp_videos.cli.WINDOWS_CHROME_SYSTEM_PATHS", ())
+        monkeypatch.setattr("mcp_videos.cli.MAC_CHROME_SYSTEM_PATHS", ())
+
+        fake_home = tmp_path / "home"
+        chrome_linux = (
+            fake_home / ".cache" / "ms-playwright" / "chromium-1140" / "chrome-linux" / "chrome"
+        )
+        chrome_linux.parent.mkdir(parents=True, exist_ok=True)
+        chrome_linux.touch()
+
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.delenv("LOCALAPPDATA", raising=False)
+        monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+        monkeypatch.setattr("platform.system", lambda: "Linux")
+        monkeypatch.setattr(os, "access", lambda path, mode: True)
+
+        detected = _detect_playwright_chromium()
+        assert detected == str(chrome_linux)
+
+    def test_detect_returns_none_when_empty(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("MCP_VIDEOS_CHROMIUM_PATH", raising=False)
+        monkeypatch.delenv("LOCALAPPDATA", raising=False)
+        monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+        monkeypatch.setattr(shutil, "which", lambda cmd: None)
+        monkeypatch.setattr("mcp_videos.cli.WINDOWS_CHROME_SYSTEM_PATHS", ())
+        monkeypatch.setattr("mcp_videos.cli.MAC_CHROME_SYSTEM_PATHS", ())
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty_home")
+
+        detected = _detect_playwright_chromium()
+        assert detected is None
+
+
+class TestDetectHyperframesCli:
+    def test_detect_via_env_dir_binary(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        bin_dir = tmp_path / "hyperframes_pkg" / "node_modules" / ".bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        cli_cmd = bin_dir / "hyperframes.cmd"
+        cli_cmd.touch()
+
+        monkeypatch.setenv("MCP_VIDEOS_HYPERFRAMES_DIR", str(tmp_path / "hyperframes_pkg"))
+        assert _detect_hyperframes_cli() == str(cli_cmd)
+
+    def test_detect_via_shutil_which(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("MCP_VIDEOS_HYPERFRAMES_DIR", raising=False)
+
+        def mock_which(cmd: str) -> str | None:
+            if cmd == "hyperframes":
+                return "C:\\Program Files\\nodejs\\hyperframes.cmd"
+            return None
+
+        monkeypatch.setattr(shutil, "which", mock_which)
+        assert _detect_hyperframes_cli() == "C:\\Program Files\\nodejs\\hyperframes.cmd"
+
+    def test_detect_via_npx_fallback(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("MCP_VIDEOS_HYPERFRAMES_DIR", raising=False)
+        monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+
+        def mock_which(cmd: str) -> str | None:
+            if cmd == "npx":
+                return "/usr/bin/npx"
+            return None
+
+        monkeypatch.setattr(shutil, "which", mock_which)
+        assert _detect_hyperframes_cli() == "/usr/bin/npx"
+
+    def test_detect_returns_none_when_unavailable(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("MCP_VIDEOS_HYPERFRAMES_DIR", raising=False)
+        monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+        monkeypatch.setattr(shutil, "which", lambda cmd: None)
+        assert _detect_hyperframes_cli() is None
+
+
+class TestDoctorCommand:
+    def test_doctor_json_contains_hyperframes_and_binaries(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        runner = CliRunner()
+        result = runner.invoke(app, ["doctor", "--json"])
+        data = json.loads(result.stdout)
+        assert "hyperframes" in data
+        assert "binaries" in data
+        assert "hyperframes" in data["binaries"]
+        assert "chromium" in data["binaries"]
+        assert "ffmpeg" in data["binaries"]
+
+    def test_doctor_human_contains_hyperframes_entry(
+        self,
+    ) -> None:
+        runner = CliRunner()
+        result = runner.invoke(app, ["doctor"])
+        assert "hyperframes:" in result.stdout
+
+
+class TestFfmpegAssFilter:
+    def test_ffmpeg_supports_ass_filter_when_present(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _ffmpeg_supports_ass_filter.cache_clear()
+
+        fake_stdout = (
+            "Filters:\n"
+            " ... aresample         A->A       Resample audio data.\n"
+            " ... ass               V->V       Render ASS subtitles onto input video.\n"
+            " ... scale             V->V       Scale the input video size.\n"
+        )
+
+        def mock_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=["ffmpeg", "-hide_banner", "-filters"],
+                returncode=0,
+                stdout=fake_stdout,
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+        assert _ffmpeg_supports_ass_filter("mock_ffmpeg_ass") is True
+
+    def test_ffmpeg_supports_ass_filter_when_absent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _ffmpeg_supports_ass_filter.cache_clear()
+
+        fake_stdout = (
+            "Filters:\n"
+            " ... aresample         A->A       Resample audio data.\n"
+            " ... scale             V->V       Scale the input video size.\n"
+        )
+
+        def mock_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=["ffmpeg", "-hide_banner", "-filters"],
+                returncode=0,
+                stdout=fake_stdout,
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+        assert _ffmpeg_supports_ass_filter("mock_ffmpeg_no_ass") is False
+
+    def test_ffmpeg_supports_ass_filter_on_os_error(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _ffmpeg_supports_ass_filter.cache_clear()
+
+        def mock_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            raise FileNotFoundError("ffmpeg no encontrado")
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+        assert _ffmpeg_supports_ass_filter("nonexistent_ffmpeg") is False
+
+
+class TestRenderWithoutLibass:
+    def test_render_burn_subtitles_skips_filter_when_no_libass(
+        self,
+        engine: DeterministicRenderEngine,
+        db: DatabaseManager,
+        workspace: WorkspaceManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        project = ProjectRepository(db).create(make_project())
+        write_silence_wav(workspace.dialogue_master_path(project.id))
+        workspace.write_scene_html(project.id, 0, "<html></html>")
+        scenes = [make_scene(0, start_ms=0, end_ms=1000)]
+        for scene in scenes:
+            SceneRepository(db).upsert(scene)
+
+        # Simular que FFmpeg NO tiene soporte para ass
+        monkeypatch.setattr(
+            "mcp_videos.render.engine._ffmpeg_supports_ass_filter",
+            lambda bin_path: False,
+        )
+
+        captured_commands: list[list[str]] = []
+
+        class DummyProcess:
+            def __init__(self, cmd: list[str]) -> None:
+                self.stdin = io.BytesIO()
+                self.stderr = io.BytesIO(b"")
+                self.returncode = 0
+                captured_commands.append(cmd)
+
+            def poll(self) -> int:
+                return 0
+
+            def wait(self, timeout: float | None = None) -> int:
+                # Simular creación de archivo temporal de salida
+                for arg in reversed(captured_commands[-1]):
+                    if arg.endswith(".mp4"):
+                        p = Path(arg)
+                        p.parent.mkdir(parents=True, exist_ok=True)
+                        p.write_bytes(b"dummy mp4")
+                        break
+                return 0
+
+            def terminate(self) -> None:
+                pass
+
+            def kill(self) -> None:
+                pass
+
+        monkeypatch.setattr(engine, "_start_ffmpeg", lambda cmd: DummyProcess(cmd))
+        monkeypatch.setattr(engine, "_capture_frames", lambda *args, **kwargs: None)
+
+        result = engine.render_project(project, scenes, burn_subtitles=True)
+        assert result.output_path.exists()
+        assert len(captured_commands) == 1
+        cmd = captured_commands[0]
+        # Debe haber omitido el filtro -vf ass
+        assert not any("ass=" in arg for arg in cmd)
+
+
+class TestRenderBrokenPipeStderr:
+    def test_broken_pipe_includes_process_stderr_in_exception(
+        self,
+        engine: DeterministicRenderEngine,
+        db: DatabaseManager,
+        workspace: WorkspaceManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        project = ProjectRepository(db).create(make_project())
+        write_silence_wav(workspace.dialogue_master_path(project.id))
+        workspace.write_scene_html(project.id, 0, "<html></html>")
+        scenes = [make_scene(0, start_ms=0, end_ms=1000)]
+        for scene in scenes:
+            SceneRepository(db).upsert(scene)
+
+        ffmpeg_stderr_message = (
+            b"[Parsed_ass_0 @ 0x55] No such filter: 'ass'\n"
+            b"Error initializing filtergraph: Filter not found\n"
+        )
+
+        class BrokenPipeProcess:
+            def __init__(self) -> None:
+                self.stdin = io.BytesIO()
+                self.stderr = io.BytesIO(ffmpeg_stderr_message)
+                self.returncode = 1
+
+            def poll(self) -> int:
+                return 1
+
+            def wait(self, timeout: float | None = None) -> int:
+                return 1
+
+            def terminate(self) -> None:
+                pass
+
+            def kill(self) -> None:
+                pass
+
+        broken_proc = BrokenPipeProcess()
+        monkeypatch.setattr(engine, "_start_ffmpeg", lambda cmd: broken_proc)
+
+        def raise_broken_pipe(*args: object, **kwargs: object) -> None:
+            raise BrokenPipeError("pipe cerrado por el subproceso")
+
+        monkeypatch.setattr(engine, "_capture_frames", raise_broken_pipe)
+
+        with pytest.raises(RenderEngineError) as exc_info:
+            engine.render_project(project, scenes, burn_subtitles=False)
+
+        error_text = str(exc_info.value)
+        assert "No such filter: 'ass'" in error_text
+
+        # Comprobar que en BD el job guardó el mensaje detallado de stderr
+        jobs = RenderJobRepository(db).list_by_project(project.id)
+        assert len(jobs) == 1
+        assert jobs[0].status is RenderStatus.FAILED
+        assert "No such filter: 'ass'" in jobs[0].error_message

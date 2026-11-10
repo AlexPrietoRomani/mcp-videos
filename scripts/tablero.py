@@ -4,7 +4,7 @@ mantiene el indice de un tablero partido en un archivo por Fase, calcula roll-up
 automatico de checkboxes, y lleva/trae esos documentos --que estan gitignorados--
 entre el repo principal y una worktree con alcance por Fase o Subfase.
 
-Run: python scripts/tablero.py --indice | --verificar | --rollup | --partir | --worktree FNN[/SFx.y] | --sync
+Run: python scripts/tablero.py --indice | --verificar | --rollup | --partir | --sync
 Stdlib only.
 """
 import argparse
@@ -44,7 +44,7 @@ VACIAS = {"el", "la", "lo", "los", "las", "un", "una", "unos", "unas", "de", "de
 
 # --- Track y rutas ---------------------------------------------------------------
 
-def raiz_repo(inicio: Path = None) -> Path:
+def raiz_repo(inicio: Path | None = None) -> Path:
     """Sube desde `inicio` hasta el directorio que contiene .git."""
     d = (inicio or Path.cwd()).resolve()
     for cand in [d, *d.parents]:
@@ -64,7 +64,7 @@ def tracks(raiz: Path) -> list:
     return sorted(d.name for d in base.iterdir() if (d / "plan_maestro.md").is_file())
 
 
-def resolver_track(raiz: Path, pedido: str = None) -> str:
+def resolver_track(raiz: Path, pedido: str | None = None) -> str:
     """El track a usar, o None si el repo tiene layout plano.
 
     Orden: --track explicito > docs/plan/plan_maestro.md (plano) > .project-suite/track
@@ -212,8 +212,9 @@ def parse_and_rollup_texto(contenido: str) -> str:
 
     # Reconstruir lineas
     if fase_idx is not None and fase_info:
+        tit_fase = fase_info["tit"]
         lineas[fase_idx] = (
-            f"## [{fase_info['estado']}] Fase {fase_info['num']}{fase_info['calif']}— {fase_info['tit']}"
+            f"## [{fase_info['estado']}] Fase {fase_info['num']}{fase_info['calif']}— {tit_fase}"
         )
 
     for sf in subfases:
@@ -351,7 +352,11 @@ def partir(r: dict) -> list:
     """
     texto = r["tablero"].read_text(encoding="utf-8")
     lineas = texto.splitlines(keepends=True)
-    cortes = [(i, PATRON_FASE.match(l)) for i, l in enumerate(lineas) if PATRON_FASE.match(l)]
+    cortes = [
+        (i, PATRON_FASE.match(linea))
+        for i, linea in enumerate(lineas)
+        if PATRON_FASE.match(linea)
+    ]
     if not cortes:
         raise SystemExit("no se encontro ninguna Fase (`## [ ] Fase N — ...`) en el tablero")
 
@@ -399,7 +404,9 @@ def resolver_objetivo(r: dict, pedido: str) -> tuple:
     else:
         m_num = re.search(r"\d+", p)
         if not m_num:
-            raise SystemExit(f"identificador no reconocido: '{pedido}'. Usa FNN (ej. F02) o SFx.y (ej. SF2.1)")
+            raise SystemExit(
+                f"identificador no reconocido: '{pedido}'. Usa FNN (ej. F02) o SFx.y (ej. SF2.1)"
+            )
         prefijo = f"F{int(m_num.group(0)):02d}"
 
     archivos = sorted(r["fases"].glob(f"{prefijo}*.md"))
@@ -417,7 +424,7 @@ def resolver_objetivo(r: dict, pedido: str) -> tuple:
 
 def archivos_de_la_fase(r: dict, pedido: str) -> list:
     """Plan maestro, tablero y SOLO el archivo de esa Fase, relativos a la raiz."""
-    prefijo, _, archivo = resolver_objetivo(r, pedido)
+    _prefijo, _, archivo = resolver_objetivo(r, pedido)
     seleccion = [r["plan"], r["tablero"], archivo]
     return [p.relative_to(r["raiz"]) for p in seleccion if p.exists()]
 
@@ -447,7 +454,7 @@ def copiar_a_worktree(r: dict, worktree: Path, pedido: str) -> list:
     return relativos
 
 
-def sincronizar(worktree: Path, raiz: Path = None) -> tuple:
+def sincronizar(worktree: Path, raiz: Path | None = None) -> tuple:
     """Copia worktree -> repo principal verificando scope. Devuelve (aplicados, divergentes).
 
     Ante divergencia NO escribe. Bloquea si la worktree intento tocar archivos fuera de su scope.
@@ -470,10 +477,11 @@ def sincronizar(worktree: Path, raiz: Path = None) -> tuple:
         if fases_dir.is_dir():
             for f in fases_dir.glob("F*.md"):
                 if not f.name.startswith(fase_permitida):
+                    scope_desc = scope.get("subfase") or "fase completa"
                     raise SystemExit(
                         f"CAMBIO BLOQUEADO: esta worktree esta acotada a {fase_permitida} "
-                        f"({scope.get('subfase') or 'fase completa'}). No tiene permisos para modificar "
-                        f"'{f.name}'. Los cambios fuera de esta Fase solo se permiten desde master/main."
+                        f"({scope_desc}). No tiene permisos para modificar '{f.name}'. "
+                        "Los cambios fuera de esta Fase solo se permiten desde master/main."
                     )
 
     aplicados, divergentes = [], []
@@ -498,11 +506,8 @@ def sincronizar(worktree: Path, raiz: Path = None) -> tuple:
 
 def crear_worktree(r: dict, pedido: str) -> Path:
     """Crea rama y worktree para la Fase o Subfase, y copia adentro los documentos del plan."""
-    prefijo, subfase, archivo = resolver_objetivo(r, pedido)
-    if subfase:
-        nombre = f"{archivo.stem}-{subfase.lower().replace('.', '-')}"
-    else:
-        nombre = archivo.stem
+    _prefijo, subfase, archivo = resolver_objetivo(r, pedido)
+    nombre = f"{archivo.stem}-{subfase.lower().replace('.', '-')}" if subfase else archivo.stem
 
     destino = r["raiz"] / ".claude" / "worktrees" / nombre
 
@@ -521,17 +526,19 @@ def crear_worktree(r: dict, pedido: str) -> Path:
 # --- CLI ---------------------------------------------------------------------------
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Tablero de project-suite: track, indice, rollup y worktree.")
+    ap = argparse.ArgumentParser(
+        description="Tablero de project-suite: track, indice, rollup y worktree."
+    )
     ap.add_argument("--track", help="track a usar; por defecto, el activo")
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--rutas", action="store_true", help="imprime las rutas resueltas en JSON")
     g.add_argument("--tracks", action="store_true", help="lista los tracks del repo")
-    g.add_argument("--indice", action="store_true", help="regenera el indice del tablero y roll-ups")
-    g.add_argument("--rollup", action="store_true", help="fuerza calculo de roll-up en todas las fases")
-    g.add_argument("--verificar", action="store_true", help="sale 1 si el indice o roll-up quedo viejo")
+    g.add_argument("--indice", action="store_true", help="regenera el indice del tablero")
+    g.add_argument("--rollup", action="store_true", help="fuerza calculo de roll-up")
+    g.add_argument("--verificar", action="store_true", help="sale 1 si el indice quedo viejo")
     g.add_argument("--partir", action="store_true", help="migra un tablero monolitico a fases/")
-    g.add_argument("--worktree", metavar="FNN[/SFx.y]", help="crea rama y worktree para esa Fase o Subfase")
-    g.add_argument("--sync", action="store_true", help="copia worktree -> repo principal con roll-up")
+    g.add_argument("--worktree", metavar="FNN[/SFx.y]", help="crea rama y worktree")
+    g.add_argument("--sync", action="store_true", help="copia worktree -> repo principal")
     a = ap.parse_args(argv)
 
     if a.sync:
@@ -572,7 +579,10 @@ def main(argv=None) -> int:
         if verificar_indice(r):
             print("OK: indice al dia")
             return 0
-        print(f"el indice de {r['tablero']} o sus fases quedaron viejos. Corre: python scripts/tablero.py --indice")
+        print(
+            f"el indice de {r['tablero']} o sus fases quedaron viejos. "
+            "Corre: python scripts/tablero.py --indice"
+        )
         return 1
     if a.partir:
         creados = partir(r)

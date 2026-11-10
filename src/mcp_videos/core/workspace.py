@@ -14,6 +14,14 @@ DIALOGUE_MASTER_FILENAME = "dialogue_master.wav"
 FINAL_VIDEO_FILENAME = "final.mp4"
 
 
+def _normalize_path(path: Path) -> Path:
+    """Elimina el prefijo extendido de Windows (\\\\?\\) para comparaciones consistentes."""
+    raw = str(path)
+    if raw.startswith("\\\\?\\") or raw.startswith("//?/"):
+        return Path(raw[4:])
+    return path
+
+
 class WorkspaceError(ValueError):
     """Base error for invalid workspace operations."""
 
@@ -38,8 +46,8 @@ class WorkspaceManager:
         workspaces_root: Path | str,
         voices_root: Path | str,
     ) -> None:
-        self.workspaces_root = Path(workspaces_root).expanduser().resolve()
-        self.voices_root = Path(voices_root).expanduser().resolve()
+        self.workspaces_root = _normalize_path(Path(workspaces_root).expanduser().resolve())
+        self.voices_root = _normalize_path(Path(voices_root).expanduser().resolve())
 
     @staticmethod
     def _validate_slug(value: str, kind: str) -> str:
@@ -62,8 +70,9 @@ class WorkspaceManager:
         if any("\x00" in part for part in candidate.parts):
             raise PathTraversalError("la ruta contiene un byte nulo")
 
-        target = (root / candidate).resolve()
-        if not target.is_relative_to(root):
+        target = _normalize_path((root / candidate).resolve())
+        norm_root = _normalize_path(root)
+        if not target.is_relative_to(norm_root):
             raise PathTraversalError(f"acceso fuera de {root} denegado: {relative_path!r}")
         return target
 
@@ -71,8 +80,9 @@ class WorkspaceManager:
         """Return the canonical project directory without creating it."""
 
         slug = self._validate_slug(project_id, "project_id")
-        target = (self.workspaces_root / slug).resolve()
-        if not target.is_relative_to(self.workspaces_root):
+        target = _normalize_path((self.workspaces_root / slug).resolve())
+        norm_root = _normalize_path(self.workspaces_root)
+        if not target.is_relative_to(norm_root):
             raise PathTraversalError("acceso fuera de workspaces_root denegado")
         return target
 

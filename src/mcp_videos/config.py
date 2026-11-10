@@ -44,6 +44,27 @@ class AppSettings(BaseSettings):
     default_video_fps: VideoFps = 60
     ffmpeg_crf: int = Field(default=18, ge=0, le=51)
 
+    hyperframes_dir: Path | None = Field(
+        default=None,
+        description="Directorio opcional donde está instalado @hyperframes/cli",
+    )
+    default_render_backend: Literal["auto", "hyperframes", "playwright"] = Field(
+        default="auto",
+        description="Motor de render predeterminado para composiciones",
+    )
+    hyperframes_npx_bin: str = Field(
+        default="npx",
+        description="Comando o binario para invocar hyperframes vía npx",
+    )
+
+    @field_validator("hyperframes_dir", mode="before")
+    @classmethod
+    def _coerce_hyperframes_dir(cls, value: object) -> object:
+        """Convierte una cadena vacía o espacios en None para Path opcional."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("default_video_fps", mode="before")
     @classmethod
     def _coerce_video_fps(cls, value: object) -> object:
@@ -59,6 +80,11 @@ class AppSettings(BaseSettings):
     def resolved_device(self) -> ResolvedDevice:
         """Dispositivo efectivo de inferencia tras resolver `auto`."""
         return resolve_device(self.local_inference_device)
+
+    @property
+    def ffmpeg_bin(self) -> str:
+        """Nombre o ruta del binario FFmpeg activo."""
+        return os.environ.get("FFMPEG_BINARY", "ffmpeg")
 
     def ensure_base_dirs(self) -> None:
         """Crea de forma idempotente los directorios base de datos y workspaces."""
@@ -89,3 +115,7 @@ def resolve_device(preferred: InferenceDevice | None = None) -> ResolvedDevice:
     if requested == "auto":
         return "cuda" if _cuda_available() else "cpu"
     raise ValueError(f"Dispositivo de inferencia no soportado: {requested!r}")
+
+
+# Alias para conveniencia y compatibilidad de especificación
+Settings = AppSettings
