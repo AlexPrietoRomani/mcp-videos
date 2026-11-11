@@ -478,7 +478,12 @@ def save_scene(
 
 @app.command()
 def render(
-    project_id: str = typer.Option(..., "--project-id", help="Slug del proyecto."),
+    project_id: str | None = typer.Argument(None, help="Slug del proyecto."),
+    project_id_opt: str | None = typer.Option(
+        None,
+        "--project-id",
+        help="Slug del proyecto.",
+    ),
     burn_subtitles: bool = typer.Option(
         True,
         "--burn-subtitles/--no-burn-subtitles",
@@ -493,9 +498,13 @@ def render(
     as_json: bool = typer.Option(False, "--json", help="Emite la respuesta en formato JSON."),
 ) -> None:
     """Renderiza el video determinista a FPS constantes y subtitulos dinamicos."""
+    target_project_id = project_id or project_id_opt
+    if not target_project_id:
+        _abort(typer.BadParameter("Debe indicar el slug del proyecto."))
+        return
     try:
         payload = get_orchestrator().render_project(
-            project_id,
+            target_project_id,
             burn_subtitles=burn_subtitles,
             backend=backend,  # type: ignore[arg-type]
         )

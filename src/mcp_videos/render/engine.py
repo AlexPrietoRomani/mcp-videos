@@ -332,7 +332,14 @@ class DeterministicRenderEngine:
             assert process.stdin is not None
 
             def report_progress(rendered_frames: int) -> None:
-                self.jobs.update_progress(job.id, rendered_frames)
+                if rendered_frames % 30 == 0 or rendered_frames == total_frames:
+                    self.jobs.update_progress(job.id, rendered_frames)
+                if rendered_frames % 300 == 0 or rendered_frames == total_frames:
+                    print(
+                        f"Progreso de render: {rendered_frames}/{total_frames} "
+                        f"({(rendered_frames / total_frames) * 100:.1f}%)",
+                        flush=True,
+                    )
 
             self._capture_frames(
                 resolved,
