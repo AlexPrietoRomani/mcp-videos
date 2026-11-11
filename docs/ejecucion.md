@@ -1,6 +1,6 @@
 # Guía de Ejecución — mcp-videos
 
-> **Proyecto:** `mcp-videos` · **Fecha:** 2026-10-28 (Actualizado Fase 6) · **Autor:** Alex Prieto Romani <alexprieto1997@gmail.com>
+> **Proyecto:** `mcp-videos` · **Fecha:** 2026-11-11 (Fase 7 — Figuras Isométricas) · **Autor:** Alex Prieto Romani <alexprieto1997@gmail.com>
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Tipo | Señal de que aplica | Secciones obligatorias |
 |---|---|---|
-| [X] **Pipeline / ETL secuencial + Servidor MCP & Preview Web** | Flujos encadenados (Audio-First → Whisper → HTML → Auditoría Visual → Render Híbrido 60 FPS) + `FastMCP` + `FastAPI` | §1, §2B, §3, §4C, §4F, §5C, §6 |
+| [X] **Pipeline / ETL secuencial + Servidor MCP & Preview Web** | Flujos encadenados (Audio-First → Whisper → HTML/IsoKit → Auditoría Geométrica & Visual → Render Híbrido 60 FPS) + `FastMCP` + `FastAPI` | §1, §2B, §3, §4C, §4F, §4G, §5C, §6 |
 
 ---
 
@@ -146,14 +146,14 @@ cp .env.example .env
 uv run python -m mcp_videos.mcp_server
 ```
 
-**Herramientas MCP expuestas para agentes IA (Fase 6):**
+**Herramientas MCP expuestas para agentes IA:**
 - `register_voice(voice_id, name, engine, mode, sample_wav_path, language, config)`: Registra una voz predefinida o clona a partir de un WAV de 3–30 s.
 - `list_voices(language)`: Lista el catálogo de voces disponibles.
 - `create_project(project_id, title, width, height, fps, description)`: Inicializa el proyecto y su workspace.
 - `synthesize_dialogue(project_id, lines)`: Sintetiza el diálogo multivoz (-16 LUFS), genera `dialogue_master.wav` y puebla `word_timestamps` con `faster-whisper`.
-- `save_and_validate_scene(project_id, scene_index, title, start_ms, end_ms, html_content, prompt, provider)`: Guarda y valida una escena HTML con compuerta DOM/JS en Playwright.
-- `audit_project_visuals(project_id, backend="auto")`: **(Nuevo en Fase 6)** Exporta la composición híbrida (`index.html`) con el arnés dual `window.__timelines` ↔ `window.__setFrameTime` y ejecuta más de 80 comprobaciones visuales con HyperFrames (o validación DOM/JS en Playwright si `backend="playwright"` o no está instalado).
-- `render_project_video(project_id, burn_subtitles=True, fps=None, backend="auto")`: **(Actualizado en Fase 6)** Renderiza el video determinista a FPS constantes en `final.mp4`. Soporta `backend="auto"|"hyperframes"|"playwright"`.
+- `save_and_validate_scene(project_id, scene_index, title, start_ms, end_ms, html_content, prompt, provider)`: Guarda y valida una escena HTML con compuerta DOM/JS en Playwright y auditoría de líneas isométricas.
+- `audit_project_visuals(project_id, backend="auto")`: Exporta la composición híbrida (`index.html`) con el arnés dual `window.__timelines` ↔ `window.__setFrameTime` y ejecuta más de 80 comprobaciones visuales con HyperFrames (o validación DOM/JS en Playwright si `backend="playwright"` o no está instalado).
+- `render_project_video(project_id, burn_subtitles=True, fps=None, backend="auto")`: Renderiza el video determinista a FPS constantes en `final.mp4`. Soporta `backend="auto"|"hyperframes"|"playwright"`.
 
 #### Opción 2 — Levantar el Estudio Web de Previsualización Interactiva (`Live Studio Preview`)
 
@@ -177,10 +177,10 @@ uv run python -m uvicorn mcp_videos.preview.server:app --host 127.0.0.1 --port 8
 #### Opción A: Construir y renderizar el Short demostrativo completo en un solo comando
 
 ```bash
-uv run python -m mcp_videos.cli build-demo --project-id short-antena-st6
+uv run python -m mcp_videos.cli build-demo --project-id short-antena-st7
 ```
 
-#### Opción B: Ejecución paso a paso por flujo (CLI Fase 6)
+#### Opción B: Ejecución paso a paso por flujo (CLI)
 
 ```bash
 # [Paso 1/6] — Registrar voces (predefinidas o clonadas desde archivo .wav de 3-30s)
@@ -231,6 +231,162 @@ uv run python -m mcp_videos.cli render \
 
 ---
 
+### 4G. Figuras Isométricas Interactivas (Anatomy IsoKit)
+
+A partir de la **Fase 7**, `mcp-videos` incorpora el kit isométrico de precisión basado en `wheresryan22/anatomy` (`src/mcp_videos/scenes/anatomy_kit/`). Este sistema permite generar escenas explicativas de alta fidelidad con máquinas mecánicas, instrumentos de medición de precisión (relojes comparadores, micrómetros, bloques de referencia), calibradores y despieces técnicos animados a 60 FPS deterministas con sombreado canónico en 4 tonos de sombra y trazado de aristas SVG.
+
+#### 4G.1 Generación de Escenas con `isometric_instrument.html` y Auto-Detección
+
+Existen dos formas de generar o invocar escenas isométricas interactivas:
+
+1. **Selección Explícita por Plantilla:**
+   En el generador o CLI se especifica `template_name="isometric_instrument.html"` (o mediante sus alias `"isometric"` / `"isometric_instrument"`).
+2. **Auto-Detección Semántica por Palabras Clave:**
+   Si no se especifica una plantilla, `SceneGenerator` analiza el texto combinado del prompt, título y subtítulo de la escena. Si detecta cualquiera de las siguientes palabras clave:
+   - `isométrico`, `isometric`, `anatomy`, `instrument`, `instrumento`, `máquina`, `calibrador`, `dial`
+   el motor selecciona automáticamente la plantilla `ISOMETRIC_INSTRUMENT_TEMPLATE` (`isometric_instrument.html`), configurando la base biselada (`.iso-plate`), el comparador graduado y la telemetría técnica en vivo.
+
+**Ejemplo de generación CLI:**
+```bash
+uv run python -m mcp_videos.cli save-scene \
+  --project-id instrumento-precision \
+  --scene-index 0 \
+  --start-ms 0 \
+  --end-ms 5500 \
+  --title "Calibración con Bloques Patrón" \
+  --prompt "Máquina isométrica con reloj comparador y palpador con resorte midiendo escalones de bloque"
+```
+
+---
+
+#### 4G.2 API `window.IsoKit` y Modelado Geométrico
+
+El arnés inyecta globalmente `window.IsoKit`, el cual expone primitivas geométricas 3D puras proyectadas a SVG sin dependencias de librerías externas:
+
+```javascript
+// Garantiza que la hoja de estilos canónica iso.css esté presente en el documento
+window.IsoKit.ensureStyles(document);
+
+var k = window.IsoKit;
+var WIDTH = 640;
+var HEIGHT = 380;
+
+// Definición de geometrías en coordenadas 3D locales [x, y, z]
+var PLATE = { x: -128, y: -64, w: 262, d: 128, r: 8 }; // Placa base
+var DIAL = [58, 0];                                     // Centro del comparador
+var DIAL_R = 20;
+
+// 1. fitProjection: Calcula la matriz de proyección isométrica P adaptada a los puntos 3D
+var P = k.fitProjection(
+  k.boxCorners(PLATE, -17, 0).concat([[DIAL[0] + DIAL_R, 0, 92]]),
+  WIDTH,
+  HEIGHT,
+  { pad: 26, azimuth: 42 }
+);
+
+// 2. slabOf: Genera las caras sólidas para bloques rectangulares biselados
+var plateSlab = k.slabOf(PLATE, -12, 0, 8);
+var plateSvg = k.solidSvg(plateSlab, "iso-plate-fill");
+
+// 3. cylinder: Genera cilindros (postes, columnas, vástagos)
+var postCylinder = k.cylinder([-98, 0], 4, 0, 122);
+var postSvg = k.solidSvg(postCylinder, "iso-metal");
+
+// 4. knurl: Genera patrón moleteado diamantado para perillas y empuñaduras
+var knobKnurl = k.knurl([0, 0], 12, 0, 16, 24);
+var knobSvg = k.solidSvg(knobKnurl, "iso-knurl");
+
+// 5. radialTicks: Genera marcas de graduación circulares en diales y manómetros
+var dialTicks = k.radialTicks(DIAL, DIAL_R - 2, 20, 92, { tickLength: 3 });
+var ticksSvg = k.lineSvg(dialTicks, "iso-line");
+
+// 6. translateAlong: Genera la cadena transform SVG 'translate(tx, ty)' proyectada
+var carriageTransform = k.translateAlong(P, [currentX, 0, 0]);
+carriageElement.setAttribute("transform", carriageTransform);
+```
+
+**Catálogo de primitivas clave en `window.IsoKit`:**
+- `ensureStyles(doc)`: Inyecta el CSS canónico con variables de sombra `--iso-top`, `--iso-side-l`, `--iso-side-r`, `--iso-front` y estilos de arista `.iso-line`.
+- `fitProjection(points, width, height, options)`: Ajusta la cámara isométrica al bounding box con acimut configurable.
+- `slabOf(box, z0, z1, radius)`: Genera los polígonos proyectados de una placa con bordes redondeados.
+- `cylinder(centre, radius, z0, z1)`: Genera los sólidos y contornos de un cilindro 3D.
+- `solidSvg(paths, style)`: Emite `<path>` SVG con clases de sombra canónicas de 4 tonos.
+- `lineSvg(pathD, style)`: Emite `<path>` SVG con la clase técnica `.iso-line`.
+- `knurl(centre, radius, z0, z1, count)`: Genera geometrías moleteadas industriales.
+- `radialTicks(centre, radius, count, z, options)`: Produce graduaciones radiales de diales e instrumentos.
+- `translateAlong(P, [dx, dy, dz])`: Proyecta desplazamientos 3D en traslaciones 2D compatibles con SVG y CSS.
+
+---
+
+#### 4G.3 Cinemática Determinista con `MotionKit` (`stepDampedAt` y `stepSpringAt`)
+
+En animaciones de video y renderizado determinista a 60 FPS, **está estrictamente prohibido usar loops basados en `requestAnimationFrame` (`dt = now - last`)**, ya que provocan desincronización y resultados no reproducibles cuando el orquestador salta a un frame arbitrario (`seek`) o cuando HyperFrames renderiza en paralelo.
+
+Para resolver esto, `window.MotionKit` implementa dos solvers deterministas evaluados directamente en `t = timeMs`:
+
+##### 1. `MotionKit.stepDampedAt(timeMs, keyframes, tauSec)`
+Calcula la posición de una etapa o carro móvil integrando analíticamente una amortiguación de primer orden hacia cada objetivo:
+- `timeMs`: Tiempo absoluto de la escena en milisegundos.
+- `keyframes`: Lista de puntos clave `[{ atMs: 1200, value: -20 }, { atMs: 2800, value: 45 }]` o tuplas `[[1200, -20], ...]`.
+- `tauSec`: Tiempo característico de amortiguación en segundos (por defecto `0.28 s`).
+- **Retorno:** `{ value, target, index }`.
+
+##### 2. `MotionKit.stepSpringAt(timeMs, keyframesOrTargetFn, options)`
+Simula un oscilador armónico amortiguado (resorte/muelle físico) determinista con sub-pasos integrados desde `t = 0`:
+- `keyframesOrTargetFn`: Secuencia de keyframes o una **función continua** `targetFn(tMs)` (por ejemplo, la altura del palpador calculada a partir de la posición del carro en cada instante `tMs`).
+- `options`: `{ stiffness: 420, damping: 26, mass: 1, initialValue: 0 }`.
+- **Retorno:** `{ value, velocity, target }`.
+
+##### Integración en `window.onFrameTime`
+```javascript
+window.onFrameTime = function (timeMs) {
+  var kit = window.MotionKit;
+  var k = window.IsoKit;
+  var time = Math.max(0, Math.min(duration, Number(timeMs) || 0));
+
+  // 1. Cinemática suave del carro de traslación
+  var carriageState = kit.stepDampedAt(time, keyframes, 0.28);
+  var currentX = carriageState.value;
+  carriageEl.setAttribute("transform", k.translateAlong(P, [currentX, 0, 0]));
+
+  // 2. Cinemática física del palpador y aguja (resorte armónico acoplado al carro)
+  var springState = kit.stepSpringAt(
+    time,
+    function (tMs) {
+      var c = kit.stepDampedAt(tMs, keyframes, 0.28);
+      return heightUnder(c.value); // Altura del bloque debajo del palpador
+    },
+    { stiffness: 420, damping: 26, initialValue: 24 }
+  );
+  var tipHeight = springState.value;
+  var dialReading = Math.max(0, tipHeight - BASE_HEIGHT);
+
+  plungerEl.setAttribute("transform", k.translateAlong(P, [0, 0, tipHeight]));
+  needleEl.setAttribute("d", needleAt(dialReading / PER_TURN));
+
+  // 3. Telemetría de readout en vivo sincronizada
+  readoutEl.textContent = "MEDICIÓN: " + dialReading.toFixed(2) + " mm";
+};
+```
+
+---
+
+#### 4G.4 Auditoría Geométrica de Puntas de Línea (`lineEnds` / `data-audit-lines="1"`)
+
+Una regla técnica fundamental de `wheresryan22/anatomy` es que **ninguna línea de arista o textura (`.iso-line`) puede terminar flotando en el aire sin anclaje visual**; cada extremo debe conectar exactamente con otra línea, coincidir con un vértice o quedar oculto tras un sólido, a menos que lleve explícitamente el atributo `data-free`.
+
+`SceneValidator` integra el algoritmo geométrico `lineEnds({ select: '.iso-plate', tolerance: 1.5 })` en Chromium Headless:
+
+1. **Detección Automática:**
+   Si la escena HTML incluye `.iso-plate` o `.iso-svg`, el validador inyecta el script `load_line_ends_script()` y analiza las intersecciones de todas las puntas de línea.
+2. **Modo Estricto (`data-audit-lines="1"` / `check_iso_lines=True`):**
+   - Cuando el contenedor de la escena incluye el atributo `data-audit-lines="1"` (o `data-audit-lines="true"`), o cuando se invoca la validación con `check_iso_lines=True`, cualquier arista flotante no anclada se registra en `ValidationResult.iso_line_problems` y se añade a `ValidationResult.errors`.
+   - Si existen líneas flotantes, la escena se marca como `validation_status = 'invalid'` con el reporte exacto de coordenadas del extremo problemático, impidiendo renderizar videos con fallos de dibujo técnico.
+3. **Excepción Explícita (`data-free`):**
+   Si un trazo deliberadamente debe quedar libre (por ejemplo, una cota de medida con flecha o una línea de referencia técnica), basta con añadir el atributo `data-free="true"` al elemento `<path>`.
+
+---
+
 ## 5. Despliegue
 
 ### 5C. Ejecución en Servidor Local / Contenedor Docker
@@ -257,6 +413,7 @@ docker run -d -p 8080:8080 \
 | `ffmpeg: command not found` en síntesis o renderizado | `ffmpeg` no está instalado o no se encuentra en el `PATH` | Instalar FFmpeg (`winget install Gyan.FFmpeg` en Windows, `sudo apt install ffmpeg` en Ubuntu, o `pacman -S ffmpeg`) y verificar con `doctor`. |
 | Advertencia: *«El binario FFmpeg no incluye soporte libass (filtro 'ass')»* al renderizar con subtítulos | En Windows o entornos Conda/Anaconda, la compilación de FFmpeg suele carecer de la biblioteca `libass` (`--enable-libass`), por lo que no reconoce el filtro `-vf ass=...`. | `mcp-videos` detecta automáticamente la ausencia del filtro `ass` mediante `_ffmpeg_supports_ass_filter` (`ffmpeg -hide_banner -filters`), omite `-vf ass=...` para no romper el pipe de codificación y **mantiene los subtítulos sincronizados en pantalla a través del DOM HTML**. Para habilitar quemado por FFmpeg, instale una build completa con `winget install Gyan.FFmpeg`. |
 | `HyperFramesNotFoundError` al ejecutar `check` o `render` con `--backend hyperframes` | Se forzó explícitamente el backend `hyperframes` pero el paquete no está instalado en el sistema ni en `MCP_VIDEOS_HYPERFRAMES_DIR`. | Instalar HyperFrames con `npm install -g hyperframes` o usar `--backend auto` para permitir el fallback automático al motor Playwright. |
+| Fallo de validación por línea flotante (`iso-line flotante: ...`) | La escena isométrica contiene trazos `.iso-line` cuyas puntas terminan en el vacío bajo `data-audit-lines="1"`. | Ajustar los extremos de la línea en `IsoKit` para anclarlos a un sólido, arista o vértice, o marcar el trazo con `data-free="true"` si es una línea técnica deliberada. |
 | `SceneNotValidatedError` al intentar exportar a MP4 | Una escena falló la validación DOM/JS o el diálogo se regeneró tras guardar la escena alterando los timestamps. | Revisar `validation_errors_json` en SQLite o reejecutar `save-scene` para validar la escena frente a los nuevos timestamps de palabra. |
 | Síntesis lenta en máquinas sin GPU NVIDIA | Se seleccionó un modelo pesado en precisión `float32` sobre CPU. | Configurar `LOCAL_INFERENCE_DEVICE=cpu` y `WHISPER_COMPUTE_TYPE=int8` en `.env`, y utilizar voces ligeras `kokoro`/`piper` para iteración rápida. |
 | Puerto `8080` ocupado al abrir el Estudio Web | Otro servicio local está escuchando en el puerto predeterminado. | Definir `PREVIEW_PORT=8081` en `.env` o especificar `--port 8081` al arrancar el servidor. |
