@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -387,6 +388,47 @@ class TestIsometricInstrumentTemplate:
                 # El carro y aguja deben haberse movido respecto a t=0
                 assert s_later["carriageTransform"] != s0["carriageTransform"]
                 assert s_later["needleD"] != s0["needleD"]
+            finally:
+                browser.close()
+
+    def test_custom_metrics_render_target_values_without_overwrite(self) -> None:
+        custom_metrics = [
+            {"label": "DOCS", "value": 3, "unit": "docs", "decimals": 0},
+            {"label": "FASES", "value": 7, "unit": "fases", "decimals": 0},
+            {"label": "DOD", "value": 100, "unit": "%", "decimals": 0},
+        ]
+        context = {
+            "TITLE": "Métricas Personalizadas",
+            "SUBTITLE": "Verificación de valores objetivos independientes.",
+            "EYEBROW": "TELEMETRÍA",
+            "THEME": "dark",
+            "ACCENT": "#67e8f9",
+            "WIDTH": 1080,
+            "HEIGHT": 1920,
+            "START_MS": 0,
+            "DURATION_MS": 4000,
+            "END_SECONDS": "00:04.000",
+            "METRICS_HTML": json.dumps(custom_metrics),
+            "WORDS_HTML": "<span>test</span>",
+            "WORD_CUES_JSON": "[]",
+        }
+        rendered = inject_harness(render_template(ISOMETRIC_INSTRUMENT_TEMPLATE, context))
+
+        with sync_playwright() as playwright:
+            browser = _launch_chromium(playwright)
+            try:
+                page = browser.new_page(viewport={"width": 1080, "height": 1920})
+                page.set_content(rendered)
+
+                page.evaluate("window.__setFrameTime(2000)")
+                numbers = page.evaluate(
+                    """
+                    () => Array.from(
+                      document.querySelectorAll(".metric-number")
+                    ).map((el) => el.textContent.trim())
+                    """
+                )
+                assert numbers == ["3", "7", "100"]
             finally:
                 browser.close()
 
