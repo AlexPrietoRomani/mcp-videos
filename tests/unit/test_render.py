@@ -226,7 +226,7 @@ class TestAssSubtitles:
             make_word(1, "DINAMICO", 400, 800),
         ]
         target = generate_ass_subtitles(words, 360, 640, tmp_path / "subtitles.ass")
-        null_out = "NUL" if os.name == "nt" else "-"
+        null_out = "-"
 
         completed = subprocess.run(
             [

@@ -82,10 +82,9 @@ logger = logging.getLogger(__name__)
 
 
 def _escape_filter_path(path: Path) -> str:
-    value = str(path).replace("\\", "\\\\")
-    for character in (":", "'", ",", "[", "]"):
-        value = value.replace(character, f"\\{character}")
-    return value
+    posix_path = path.as_posix()
+    escaped = posix_path.replace(":", "\\:").replace("'", "\\'")
+    return f"'{escaped}'"
 
 
 @functools.lru_cache(maxsize=8)

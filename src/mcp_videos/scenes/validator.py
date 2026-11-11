@@ -56,6 +56,7 @@ class ValidationResult:
     duration_ms: int = 0
     checked_times_ms: list[float] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    iso_line_problems: list[str] = field(default_factory=list)
 
     @property
     def valid(self) -> bool:
@@ -80,6 +81,7 @@ class ValidationResult:
             "duration_ms": self.duration_ms,
             "checked_times_ms": list(self.checked_times_ms),
             "validation_errors": list(self.errors),
+            "iso_line_problems": list(self.iso_line_problems),
         }
 
 
@@ -285,6 +287,7 @@ class SceneValidator:
         html_path: Path | str | None = None,
         width: int | None = None,
         height: int | None = None,
+        check_iso_lines: bool | None = None,
     ) -> ValidationResult:
         """Instrument ``html`` and validate it at ``t=0``, ``t=dur/2`` and ``t=dur``."""
 
@@ -306,6 +309,8 @@ class SceneValidator:
                     duration_ms=duration_ms,
                     width=viewport_width,
                     height=viewport_height,
+                    check_iso_lines=check_iso_lines,
+                    raw_html=prepared,
                 )
 
         target = Path(html_path).expanduser()
@@ -318,6 +323,8 @@ class SceneValidator:
             duration_ms=duration_ms,
             width=viewport_width,
             height=viewport_height,
+            check_iso_lines=check_iso_lines,
+            raw_html=prepared,
         )
 
     def validate_file(
@@ -327,6 +334,7 @@ class SceneValidator:
         duration_ms: int,
         width: int | None = None,
         height: int | None = None,
+        check_iso_lines: bool | None = None,
     ) -> ValidationResult:
         """Read, instrument and validate an existing scene file."""
 
@@ -340,6 +348,7 @@ class SceneValidator:
             html_path=target,
             width=width,
             height=height,
+            check_iso_lines=check_iso_lines,
         )
 
     def _validate_file(
@@ -349,6 +358,8 @@ class SceneValidator:
         duration_ms: int,
         width: int,
         height: int,
+        check_iso_lines: bool | None = None,
+        raw_html: str | None = None,
     ) -> ValidationResult:
         times = [0.0, duration_ms / 2.0, float(duration_ms)]
         result = ValidationResult(duration_ms=duration_ms, checked_times_ms=list(times))
@@ -378,6 +389,27 @@ class SceneValidator:
                     result.errors.append(f"navigation: {_normalize_message(exc)}")
                 else:
                     self._inspect_and_seek(page, times, result)
+                    html_source = raw_html or ""
+                    if not html_source and scene_path.is_file():
+                        with contextlib.suppress(OSError):
+                            html_source = scene_path.read_text(encoding="utf-8")
+
+                    should_check_iso = check_iso_lines is True or (
+                        check_iso_lines is None
+                        and (
+                            'data-audit-lines="1"' in html_source
+                            or 'data-audit-lines="true"' in html_source
+                            or ".iso-plate" in html_source
+                            or 'class="iso-plate"' in html_source
+                        )
+                    )
+                    if should_check_iso:
+                        self._audit_iso_lines(
+                            page,
+                            result,
+                            check_iso_lines=check_iso_lines,
+                            raw_html=html_source,
+                        )
 
                 with contextlib.suppress(PlaywrightError):
                     context.close()
@@ -386,6 +418,52 @@ class SceneValidator:
 
         result.errors = _deduplicate(result.errors)
         return result
+
+    def _audit_iso_lines(
+        self,
+        page: Any,
+        result: ValidationResult,
+        *,
+        check_iso_lines: bool | None = None,
+        raw_html: str = "",
+    ) -> None:
+        try:
+            has_target = page.evaluate(
+                """() => Boolean(document.querySelector(".iso-plate, .iso-svg"))"""
+            )
+            if not has_target:
+                return
+
+            from mcp_videos.scenes.anatomy_kit import load_line_ends_script
+
+            page.evaluate(load_line_ends_script())
+            selector = page.evaluate(
+                """() => document.querySelector(".iso-plate") ? ".iso-plate" : ".iso-svg" """
+            )
+            audit_result = page.evaluate(
+                f"""() => {{
+                    if (typeof window.lineEnds !== 'function') return null;
+                    try {{
+                        return window.lineEnds({{ select: '{selector}', tolerance: 1.5 }});
+                    }} catch (e) {{
+                        return {{ error: String(e) }};
+                    }}
+                }}"""
+            )
+            if audit_result and isinstance(audit_result, dict):
+                problems = audit_result.get("problems") or []
+                strict = (
+                    check_iso_lines is True
+                    or 'data-audit-lines="1"' in raw_html
+                    or 'data-audit-lines="true"' in raw_html
+                )
+                for item in problems:
+                    prob_str = f"iso-line flotante: {item}" if isinstance(item, dict) else str(item)
+                    result.iso_line_problems.append(prob_str)
+                    if strict:
+                        result.errors.append(prob_str)
+        except PlaywrightError as exc:
+            result.errors.append(f"iso_lines: {_normalize_message(exc)}")
 
     @staticmethod
     def _make_pageerror_handler(result: ValidationResult) -> Any:
@@ -511,6 +589,7 @@ class SceneValidator:
         project: Project | None = None,
         workspace: WorkspaceManager | None = None,
         html_content: str | None = None,
+        check_iso_lines: bool | None = None,
     ) -> Scene:
         """Validate an already persisted scene and update its repository gate."""
 
@@ -541,6 +620,7 @@ class SceneValidator:
             html_path=scene_path,
             width=width,
             height=height,
+            check_iso_lines=check_iso_lines,
         )
 
         if self.repository is None:
@@ -570,6 +650,7 @@ class SceneValidator:
         width: int | None = None,
         height: int | None = None,
         workspace: WorkspaceManager | None = None,
+        check_iso_lines: bool | None = None,
     ) -> Scene:
         """Write a scene into its workspace, validate it and persist the result."""
 
@@ -609,6 +690,7 @@ class SceneValidator:
                 html_path=scene_path,
                 width=width,
                 height=height,
+                check_iso_lines=check_iso_lines,
             )
         except Exception as exc:
             result = ValidationResult(
