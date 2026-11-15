@@ -151,23 +151,37 @@ def render_project_video(
     project_id: str,
     burn_subtitles: bool = True,
     fps: int | None = None,
+    backend: str = "auto",
 ) -> dict[str, Any]:
     """Render validated scenes frame-by-frame at the project FPS into final.mp4.
 
     ``fps`` optionally overrides and persists the project frame rate before render.
+    ``backend`` chooses between 'auto', 'hyperframes' or 'playwright'.
     """
 
     try:
         orchestrator = get_orchestrator()
-        if fps is None:
-            return orchestrator.render_project(
-                project_id,
-                burn_subtitles=burn_subtitles,
-            )
-        return orchestrator.render_project(
-            project_id,
-            burn_subtitles=burn_subtitles,
-            fps=fps,
+        kwargs: dict[str, Any] = {
+            "burn_subtitles": burn_subtitles,
+            "backend": backend,
+        }
+        if fps is not None:
+            kwargs["fps"] = fps
+        return orchestrator.render_project(project_id, **kwargs)
+    except Exception as error:
+        return _error_payload(error)
+
+
+@mcp.tool()
+def audit_project_visuals(
+    project_id: str,
+    backend: str = "auto",
+) -> dict[str, Any]:
+    """Audita las escenas visuales y la composición HyperFrames o Playwright."""
+    try:
+        return get_orchestrator().audit_project_visuals(
+            project_id=project_id,
+            backend=backend,  # type: ignore[arg-type]
         )
     except Exception as error:
         return _error_payload(error)
@@ -185,6 +199,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "FastMCP",
+    "audit_project_visuals",
     "create_project",
     "get_orchestrator",
     "list_voices",

@@ -15,6 +15,7 @@ from mcp_videos.config import AppSettings
 from mcp_videos.core.models import Scene, WordTimestamp
 from mcp_videos.core.workspace import WorkspaceManager
 from mcp_videos.scenes.templates import (
+    ISOMETRIC_INSTRUMENT_TEMPLATE,
     TECHNICAL_EXPLAINER_TEMPLATE,
     render_template,
 )
@@ -256,6 +257,16 @@ def build_system_prompt(
                 "Usa window.MotionKit.clamp, lerp, easeOutCubic, easeInOutQuad, "
                 "spring, progressInRange y activeWordAt."
             ),
+            (
+                "window.IsoKit está disponible globalmente en el arnés (IsoKit.fitProjection, "
+                "IsoKit.slabOf, IsoKit.cylinder, IsoKit.solidSvg, IsoKit.lineSvg, IsoKit.dotsSvg, "
+                "IsoKit.knurl, IsoKit.radialTicks, IsoKit.topTicks, IsoKit.faceTextSvg, "
+                "IsoKit.translateAlong, IsoKit.figureSvg, IsoKit.plateHtml, IsoKit.ensureStyles) "
+                "junto con los solvers cinemáticos deterministas MotionKit.stepDampedAt(timeMs, "
+                "keyframes, tauSec) y MotionKit.stepSpringAt(timeMs, keyframesOrTargetFn, options) "
+                "para construir máquinas e instrumentos isométricos en 4 tonos de sombra estilo "
+                "wheresryan22/anatomy."
+            ),
             "La variable CSS --time-ms contiene el tiempo local de la escena.",
             (
                 'Incluye los cues en un <script type="application/json" '
@@ -432,12 +443,14 @@ def _normalize_accent(accent: str) -> str:
     return value if _ACCENT_RE.fullmatch(value) else DEFAULT_ACCENT
 
 
-def build_technical_explainer_scene_html(
+def render_deterministic_scene(
     title: str = DEFAULT_SCENE_TITLE,
     words: Sequence[object] | None = None,
     start_ms: int = DEFAULT_START_MS,
     end_ms: int = DEFAULT_END_MS,
     *,
+    template_name: str | None = None,
+    prompt: str = "",
     cues: Sequence[object] | None = None,
     word_timestamps: Sequence[object] | None = None,
     subtitle: str = "",
@@ -451,7 +464,7 @@ def build_technical_explainer_scene_html(
     words_are_absolute: bool | None = None,
     harness_js: str | None = None,
 ) -> str:
-    """Build a local technical-explainer scene with animated SVG and telemetry."""
+    """Render a deterministic motion-graphics scene using bundled templates."""
 
     if duration_ms is not None:
         if isinstance(duration_ms, bool) or not isinstance(duration_ms, int) or duration_ms <= 0:
@@ -478,23 +491,119 @@ def build_technical_explainer_scene_html(
     theme_value = _normalize_theme(theme)
     accent_value = _normalize_accent(accent)
     caption_fallback = subtitle.strip() or title_text
+    eyebrow_text = eyebrow.strip() or DEFAULT_EYEBROW
+
+    eff_duration_ms = end_ms - start_ms
+    total_ms = max(0, eff_duration_ms)
+    minutes = total_ms // 60000
+    seconds = (total_ms % 60000) // 1000
+    ms = total_ms % 1000
+    end_seconds_str = f"{minutes:02d}:{seconds:02d}.{ms:03d}"
+
+    words_spans = [
+        f'<span class="word" data-start-ms="{cue["start_ms"]}" data-end-ms="{cue["end_ms"]}">'
+        f'{html_lib.escape(cue["word"])} </span>'
+        for cue in normalized_cues
+    ]
+    words_html = "".join(words_spans) or html_lib.escape(caption_fallback)
+
+    chosen_template = template_name
+    if chosen_template is None:
+        text = f"{prompt} {title_text} {eyebrow_text} {subtitle}".lower()
+        iso_keywords = (
+            "isométric",
+            "isometric",
+            "anatomy",
+            "instrument",
+            "máquina",
+            "calibrador",
+            "dial",
+        )
+        if any(kw in text for kw in iso_keywords):
+            chosen_template = ISOMETRIC_INSTRUMENT_TEMPLATE
+        else:
+            chosen_template = TECHNICAL_EXPLAINER_TEMPLATE
+    else:
+        alias_map = {
+            "isometric": ISOMETRIC_INSTRUMENT_TEMPLATE,
+            "isometric_instrument": ISOMETRIC_INSTRUMENT_TEMPLATE,
+            "isometric_instrument.html": ISOMETRIC_INSTRUMENT_TEMPLATE,
+            "technical": TECHNICAL_EXPLAINER_TEMPLATE,
+            "technical_explainer": TECHNICAL_EXPLAINER_TEMPLATE,
+            "technical_explainer.html": TECHNICAL_EXPLAINER_TEMPLATE,
+        }
+        chosen_template = alias_map.get(chosen_template, chosen_template)
+
+    resolved_harness = load_harness_script() if harness_js is None else harness_js
+    safe_harness = re.sub(r"</script", r"<\\/script", resolved_harness, flags=re.IGNORECASE)
+    json_cues = _json_for_html(normalized_cues)
+    json_metrics = _json_for_html(normalized_metrics)
 
     context = {
         "TITLE": html_lib.escape(title_text),
         "SUBTITLE": html_lib.escape(subtitle.strip()),
-        "EYEBROW": html_lib.escape(eyebrow.strip() or DEFAULT_EYEBROW),
+        "EYEBROW": html_lib.escape(eyebrow_text),
         "WIDTH": str(width),
         "HEIGHT": str(height),
-        "DURATION_MS": str(end_ms - start_ms),
+        "DURATION_MS": str(eff_duration_ms),
         "START_MS": str(start_ms),
         "THEME": theme_value,
         "ACCENT": accent_value,
-        "WORDS_JSON": _json_for_html(normalized_cues),
-        "METRICS_JSON": _json_for_html(normalized_metrics),
+        "WORDS_JSON": json_cues,
+        "METRICS_JSON": json_metrics,
         "CAPTION_FALLBACK": html_lib.escape(caption_fallback),
-        "HARNESS_JS": load_harness_script() if harness_js is None else harness_js,
+        "HARNESS_JS": safe_harness,
+        "WORDS_HTML": words_html,
+        "END_SECONDS": end_seconds_str,
+        "WORD_CUES_JSON": json_cues,
+        "METRICS_HTML": json_metrics,
     }
-    return render_template(TECHNICAL_EXPLAINER_TEMPLATE, context)
+    rendered = render_template(chosen_template, context)
+    if chosen_template == ISOMETRIC_INSTRUMENT_TEMPLATE:
+        rendered = inject_harness(rendered, harness_js=harness_js)
+    return rendered
+
+
+def build_technical_explainer_scene_html(
+    title: str = DEFAULT_SCENE_TITLE,
+    words: Sequence[object] | None = None,
+    start_ms: int = DEFAULT_START_MS,
+    end_ms: int = DEFAULT_END_MS,
+    *,
+    cues: Sequence[object] | None = None,
+    word_timestamps: Sequence[object] | None = None,
+    subtitle: str = "",
+    eyebrow: str = DEFAULT_EYEBROW,
+    duration_ms: int | None = None,
+    width: int = DEFAULT_WIDTH,
+    height: int = DEFAULT_HEIGHT,
+    theme: str = DEFAULT_THEME,
+    metrics: Sequence[object] | Mapping[str, Any] | None = None,
+    accent: str = DEFAULT_ACCENT,
+    words_are_absolute: bool | None = None,
+    harness_js: str | None = None,
+) -> str:
+    """Build a local technical-explainer scene with animated SVG and telemetry."""
+
+    return render_deterministic_scene(
+        title=title,
+        words=words,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        template_name=TECHNICAL_EXPLAINER_TEMPLATE,
+        cues=cues,
+        word_timestamps=word_timestamps,
+        subtitle=subtitle,
+        eyebrow=eyebrow,
+        duration_ms=duration_ms,
+        width=width,
+        height=height,
+        theme=theme,
+        metrics=metrics,
+        accent=accent,
+        words_are_absolute=words_are_absolute,
+        harness_js=harness_js,
+    )
 
 
 def _content_from_openai(payload: Mapping[str, Any]) -> str:
@@ -830,6 +939,8 @@ class SceneGenerator:
         start_ms: int = DEFAULT_START_MS,
         end_ms: int = DEFAULT_END_MS,
         *,
+        template_name: str | None = None,
+        prompt: str = "",
         cues: Sequence[object] | None = None,
         word_timestamps: Sequence[object] | None = None,
         subtitle: str = "",
@@ -844,6 +955,7 @@ class SceneGenerator:
         provider: str | None = None,
         model: str | None = None,
         words_are_absolute: bool | None = None,
+        **extra_options: Any,
     ) -> str:
         """Generate one self-contained scene document ready for validation."""
 
@@ -864,11 +976,13 @@ class SceneGenerator:
         resolved_provider = canonical_provider(provider or self.provider)
 
         if resolved_provider == "template":
-            return build_technical_explainer_scene_html(
-                title,
-                word_sequence,
-                start_ms,
-                end_ms,
+            return render_deterministic_scene(
+                title=title,
+                words=word_sequence,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                template_name=template_name,
+                prompt=prompt or instructions,
                 subtitle=subtitle,
                 eyebrow=eyebrow,
                 width=width,
@@ -922,6 +1036,7 @@ class SceneGenerator:
         workspace: WorkspaceManager,
         validator: SceneValidator | None = None,
         prompt_used: str = "",
+        template_name: str | None = None,
         **scene_options: Any,
     ) -> Scene:
         """Generate, persist and validate one scene in a single call."""
@@ -941,10 +1056,13 @@ class SceneGenerator:
             words,
             start_ms,
             effective_end_ms,
+            template_name=template_name,
+            prompt=prompt_used,
             **scene_options,
         )
         width = int(scene_options.get("width", target_validator.width))
         height = int(scene_options.get("height", target_validator.height))
+        check_iso = scene_options.get("check_iso_lines")
         return target_validator.validate_and_save(
             project_id,
             scene_index,
@@ -956,6 +1074,7 @@ class SceneGenerator:
             width=width,
             height=height,
             workspace=workspace,
+            check_iso_lines=check_iso,
         )
 
 
@@ -966,6 +1085,7 @@ __all__ = [
     "DEFAULT_METRICS",
     "DEFAULT_START_MS",
     "DEFAULT_WIDTH",
+    "ISOMETRIC_INSTRUMENT_TEMPLATE",
     "PROVIDERS",
     "WORD_CUES_SCRIPT_ID",
     "LLMProviderError",
@@ -978,4 +1098,5 @@ __all__ = [
     "embed_word_cues",
     "extract_html_document",
     "normalize_word_cues",
+    "render_deterministic_scene",
 ]

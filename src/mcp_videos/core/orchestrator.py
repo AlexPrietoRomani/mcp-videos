@@ -6,7 +6,8 @@ import os
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from itertools import pairwise
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
 from mcp_videos.config import AppSettings
 from mcp_videos.core.models import (
@@ -110,6 +111,7 @@ class ProjectOrchestrator:
         from mcp_videos.audio.dialogue_synth import DialogueSynthesizer as DefaultSynthesizer
         from mcp_videos.audio.voice_registry import VoiceRegistryService as DefaultVoiceRegistry
         from mcp_videos.render.engine import DeterministicRenderEngine as DefaultRenderEngine
+        from mcp_videos.render.hyperframes_bridge import HyperFramesBridge
         from mcp_videos.scenes.generator import SceneGenerator as DefaultSceneGenerator
         from mcp_videos.scenes.validator import SceneValidator as DefaultSceneValidator
 
@@ -152,6 +154,13 @@ class ProjectOrchestrator:
             self.db,
             self.workspace,
             self.settings,
+        )
+        self.hyperframes_bridge = HyperFramesBridge(
+            self.settings,
+            db_path=self.settings.mcp_videos_db_path,
+            render_engine=self.render_engine,
+            workspace=self.workspace,
+            scene_validator=self.scene_validator,
         )
 
     def register_voice(
@@ -433,6 +442,8 @@ class ProjectOrchestrator:
         *,
         burn_subtitles: bool = True,
         fps: int | None = None,
+        output_filename: str = "final.mp4",
+        backend: Literal["auto", "hyperframes", "playwright"] = "auto",
     ) -> dict[str, Any]:
         """Render every validated scene into the project ``final.mp4``."""
 
@@ -446,32 +457,49 @@ class ProjectOrchestrator:
                 }
             )
             project = self.projects.save(project)
+
         scenes = self.scenes.list_by_project(project_id)
-        result = self.render_engine.render_project(
+        words = self.dialogues.word_timestamps_in_window(
+            0,
+            project.total_duration_ms,
+            project_id=project.id,
+        )
+        workspace_root = self.workspace.project_dir(project.id)
+        output_mp4_path = self.workspace.output_dir(project.id) / output_filename
+
+        return self.hyperframes_bridge.render_project(
             project,
             scenes,
+            cues_data=words,
+            workspace_root=workspace_root,
+            output_mp4_path=output_mp4_path,
             burn_subtitles=burn_subtitles,
+            backend=backend,
+            fallback_engine=self.render_engine,
         )
-        updated = self.projects.get_or_raise(project_id)
-        relative_output = self.workspace.relative_project_path(
-            project_id,
-            result.output_path,
+
+    def audit_project_visuals(
+        self,
+        project_id: str,
+        *,
+        backend: Literal["auto", "hyperframes", "playwright"] = "auto",
+    ) -> dict[str, Any]:
+        """Audita visualmente las escenas y la composición de un proyecto."""
+        project = self.projects.get_or_raise(project_id)
+        scenes = self.scenes.list_by_project(project_id)
+        words = self.dialogues.word_timestamps_in_window(
+            0,
+            project.total_duration_ms,
+            project_id=project.id,
         )
-        return {
-            "job_id": result.job.id,
-            "project_id": project_id,
-            "status": result.job.status.value,
-            "project_status": updated.status.value,
-            "output_mp4_path": str(result.output_path),
-            "output_mp4_relative_path": relative_output,
-            "fps": project.fps,
-            "total_frames": result.total_frames,
-            "rendered_frames": result.rendered_frames,
-            "duration_ms": project.total_duration_ms,
-            "subtitles_path": (
-                str(result.subtitles_path) if result.subtitles_path is not None else None
-            ),
-        }
+        workspace_root = self.workspace.project_dir(project.id)
+        return self.hyperframes_bridge.check_project(
+            project,
+            scenes,
+            cues_data=words,
+            workspace_root=workspace_root,
+            backend=backend,
+        )
 
     def build_demo_short(
         self,
@@ -560,9 +588,9 @@ class ProjectOrchestrator:
             "scenes": saved_scenes,
             "render": render_summary,
             "final_video_path": (
-                render_summary["output_mp4_path"]
+                Path(render_summary["output_mp4_path"]).as_posix()
                 if render_summary is not None
-                else str(self.workspace.final_mp4_path(project_id))
+                else self.workspace.final_mp4_path(project_id).as_posix()
             ),
         }
 

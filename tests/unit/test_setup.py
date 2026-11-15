@@ -260,6 +260,8 @@ def test_check_system_dependencies_missing_ffmpeg(monkeypatch: pytest.MonkeyPatc
 
 def test_check_system_dependencies_uses_playwright_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(cli, "WINDOWS_CHROME_SYSTEM_PATHS", ())
+    monkeypatch.setattr(cli, "MAC_CHROME_SYSTEM_PATHS", ())
     monkeypatch.setattr(
         cli,
         "_find_playwright_chromium",

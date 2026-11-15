@@ -99,6 +99,16 @@ erDiagram
         TEXT started_at "datetime ISO-8601 UTC"
         TEXT completed_at "NULL hasta finalizar"
     }
+    voices_0002 {
+        TEXT id PK "tabla de transición de migración 0002"
+        TEXT name "nombre legible"
+        TEXT engine "kokoro | piper | edge_tts | xtts | f5 | elevenlabs | openai"
+        TEXT mode "preset | clone"
+        TEXT language "es | en"
+        TEXT sample_wav_path "NULL en preset; ruta en data/voices/ para clone"
+        TEXT config_json "JSON: speed, model_voice_id, temperature"
+        TEXT created_at "datetime ISO-8601 UTC"
+    }
 ```
 
 ### 1.2 Políticas de escritura
@@ -226,6 +236,19 @@ erDiagram
 | `started_at` | `TEXT` | ISO-8601 UTC | `NOT NULL` | Inicio del job |
 | `completed_at` | `TEXT` | ISO-8601 UTC | `NULL` mientras corre | Fin del job |
 
+#### Tabla `_schema_migrations` — Control interno de migraciones SQLite
+
+| Columna | Tipo SQLite | Unidad / Valores permitidos | Restricciones | Notas |
+|---|---|---|---|---|
+| `version` | `TEXT` | Nombre del archivo `.sql` | `PRIMARY KEY` | Identificador de la migración aplicada |
+| `applied_at` | `TEXT` | ISO-8601 UTC | `NOT NULL` | Fecha/hora de aplicación |
+
+#### Tabla `voices_0002` — Tabla de transición de la migración `0002_add_edge_tts_engine.sql`
+
+| Columna | Tipo SQLite | Unidad / Valores permitidos | Restricciones | Notas |
+|---|---|---|---|---|
+| `id` | `TEXT` | Slug de voz | `PRIMARY KEY` | Tabla temporal renombrada a `voices` dentro de la migración `0002` |
+
 ---
 
 ## 3. Acceso CRUD por componente
@@ -237,7 +260,9 @@ erDiagram
 | `dialogue_lines` | `audio/dialogue_synth.py` (`DELETE + INSERT`) | `audio/aligner.py`, `scenes/generator.py`, `preview/server.py` | **No** |
 | `word_timestamps` | `audio/aligner.py` (`INSERT` masivo) | `scenes/generator.py`, `render/subtitles.py`, `preview/server.py` | **No** |
 | `scenes` | `scenes/validator.py` (`UPSERT`), `render/engine.py` | `render/engine.py`, `preview/server.py`, `mcp_server.py` | **No** |
-| `render_jobs` | `render/engine.py` (`INSERT` / `UPDATE`) | `mcp_server.py`, `cli.py`, `preview/server.py` | **No** |
+| `render_jobs` | `render/engine.py` (`INSERT` / `UPDATE`), `render/hyperframes_bridge.py` | `mcp_server.py`, `cli.py`, `preview/server.py` | **No** |
+| `_schema_migrations` | `db/connection.py` (`INSERT`) | `db/connection.py` | **No** (metadatos internos de migraciones aplicadas: `version`, `applied_at`) |
+| `voices_0002` | `db/migrations/0002_add_edge_tts_engine.sql` (tabla temporal `ALTER TABLE ... RENAME TO voices`) | N/A (eliminada al cierre de la migración `0002`) | **No** |
 
 ---
 

@@ -192,7 +192,10 @@ class TestPathTraversalProtection:
         outside = tmp_path / "outside"
         outside.mkdir()
         (outside / "secreto.txt").write_text("no leer", encoding="utf-8")
-        (project / "link").symlink_to(outside, target_is_directory=True)
+        try:
+            (project / "link").symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"No hay privilegios para crear enlaces simbólicos en este entorno: {exc}")
 
         with pytest.raises(PathTraversalError):
             manager.resolve_project_path("proyecto-uno", "link/secreto.txt")
@@ -218,7 +221,10 @@ class TestPathTraversalProtection:
         manager.ensure_voices_dir()
         outside = tmp_path / "outside.wav"
         outside.write_bytes(b"audio")
-        (manager.voices_root / "voz-mala.wav").symlink_to(outside)
+        try:
+            (manager.voices_root / "voz-mala.wav").symlink_to(outside)
+        except OSError as exc:
+            pytest.skip(f"No hay privilegios para crear enlaces simbólicos en este entorno: {exc}")
 
         with pytest.raises(PathTraversalError):
             manager.voice_sample_path("voz-mala")

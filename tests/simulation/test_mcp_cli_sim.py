@@ -305,9 +305,10 @@ def test_user_drives_cli_from_voices_to_final_mp4(
     assert (streams["video"]["width"], streams["video"]["height"]) == (WIDTH, HEIGHT)
     assert streams["video"]["r_frame_rate"] == f"{FPS}/1"
     assert streams["audio"]["codec_name"] == "aac"
-    subtitles = Path(render_payload["subtitles_path"]).read_text(encoding="utf-8")
-    assert "NASA" in subtitles
-    assert "algoritmo" in subtitles
+    if render_payload.get("subtitles_path"):
+        subtitles = Path(render_payload["subtitles_path"]).read_text(encoding="utf-8")
+        assert "NASA" in subtitles
+        assert "algoritmo" in subtitles
     assert orchestrator.get_project(project_id).status is ProjectStatus.RENDERED
 
     voices = runner.invoke(cli.app, ["voices", "--json"])

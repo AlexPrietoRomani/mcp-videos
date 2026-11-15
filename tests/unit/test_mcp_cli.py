@@ -18,6 +18,7 @@ import mcp_videos.mcp_server as server
 from mcp_videos.cli import SystemCheckResult
 
 EXPECTED_TOOLS = {
+    "audit_project_visuals",
     "create_project",
     "list_voices",
     "register_voice",
@@ -166,12 +167,14 @@ class FakeOrchestrator:
         *,
         burn_subtitles: bool = True,
         fps: int | None = None,
+        backend: str = "auto",
     ) -> dict[str, Any]:
         self._record(
             "render_project",
             project_id=project_id,
             burn_subtitles=burn_subtitles,
             fps=fps,
+            backend=backend,
         )
         return {
             "job_id": "job-1",
@@ -185,6 +188,21 @@ class FakeOrchestrator:
             "rendered_frames": 120,
             "duration_ms": 2400,
             "subtitles_path": f"/workspaces/{project_id}/output/final.ass",
+            "backend_used": backend,
+        }
+
+    def audit_project_visuals(
+        self,
+        project_id: str,
+        *,
+        backend: str = "auto",
+    ) -> dict[str, Any]:
+        self._record("audit_project_visuals", project_id=project_id, backend=backend)
+        return {
+            "ok": True,
+            "backend_used": backend,
+            "composition_html_path": f"/workspaces/{project_id}/hyperframes/index.html",
+            "report": {"scenes_checked": 2, "errors": []},
         }
 
     def build_demo_short(self, project_id: str, **kwargs: Any) -> dict[str, Any]:
@@ -352,7 +370,11 @@ class TestMcpServer:
         rendered = mcp_payload(
             call_tool(
                 "render_project_video",
-                {"project_id": "short-mcp", "burn_subtitles": False},
+                {
+                    "project_id": "short-mcp",
+                    "burn_subtitles": False,
+                    "backend": "hyperframes",
+                },
             )
         )
 
@@ -360,6 +382,22 @@ class TestMcpServer:
         assert fake.calls[0]["html_content"] == "<html></html>"
         assert rendered["status"] == "completed"
         assert fake.calls[1]["burn_subtitles"] is False
+        assert fake.calls[1]["backend"] == "hyperframes"
+
+    def test_audit_project_visuals_tool(
+        self,
+        fake: FakeOrchestrator,
+    ) -> None:
+        result = mcp_payload(
+            call_tool(
+                "audit_project_visuals",
+                {"project_id": "short-mcp", "backend": "hyperframes"},
+            )
+        )
+        assert result["ok"] is True
+        assert result["backend_used"] == "hyperframes"
+        assert fake.calls[0]["operation"] == "audit_project_visuals"
+        assert fake.calls[0]["backend"] == "hyperframes"
 
     def test_tool_errors_are_returned_as_structured_payloads(
         self,
@@ -587,6 +625,64 @@ class TestCli:
         payload = json.loads(result.output)
         assert payload["status"] == "completed"
         assert fake.calls[0]["burn_subtitles"] is False
+
+    def test_render_command_with_backend(
+        self,
+        runner: CliRunner,
+        fake: FakeOrchestrator,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(cli, "get_orchestrator", lambda: fake)
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "render",
+                "--project-id",
+                "short-cli",
+                "--backend",
+                "hyperframes",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["backend_used"] == "hyperframes"
+        assert fake.calls[0]["backend"] == "hyperframes"
+
+    def test_check_command(
+        self,
+        runner: CliRunner,
+        fake: FakeOrchestrator,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(cli, "get_orchestrator", lambda: fake)
+
+        result = runner.invoke(
+            cli.app,
+            ["check", "short-cli", "--backend", "hyperframes", "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload["ok"] is True
+        assert payload["backend_used"] == "hyperframes"
+        assert fake.calls[0]["operation"] == "audit_project_visuals"
+        assert fake.calls[0]["backend"] == "hyperframes"
+
+    def test_check_command_human_output(
+        self,
+        runner: CliRunner,
+        fake: FakeOrchestrator,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(cli, "get_orchestrator", lambda: fake)
+
+        result = runner.invoke(cli.app, ["check", "short-cli"])
+
+        assert result.exit_code == 0
+        assert "Auditoría visual de short-cli: OK" in result.output
 
     def test_build_demo_command(
         self,

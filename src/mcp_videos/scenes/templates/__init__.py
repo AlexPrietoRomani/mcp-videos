@@ -8,7 +8,12 @@ from pathlib import Path
 TEMPLATES_DIR = Path(__file__).resolve().parent
 BASE_SCENE_TEMPLATE = "base_scene.html"
 TECHNICAL_EXPLAINER_TEMPLATE = "technical_explainer.html"
-AVAILABLE_TEMPLATES = (BASE_SCENE_TEMPLATE, TECHNICAL_EXPLAINER_TEMPLATE)
+ISOMETRIC_INSTRUMENT_TEMPLATE = "isometric_instrument.html"
+AVAILABLE_TEMPLATES = (
+    BASE_SCENE_TEMPLATE,
+    TECHNICAL_EXPLAINER_TEMPLATE,
+    ISOMETRIC_INSTRUMENT_TEMPLATE,
+)
 _PLACEHOLDER_RE = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
 
 
@@ -57,6 +62,7 @@ def render_template(name: str, context: dict[str, object]) -> str:
 __all__ = [
     "AVAILABLE_TEMPLATES",
     "BASE_SCENE_TEMPLATE",
+    "ISOMETRIC_INSTRUMENT_TEMPLATE",
     "TECHNICAL_EXPLAINER_TEMPLATE",
     "TEMPLATES_DIR",
     "TemplateNotFoundError",
